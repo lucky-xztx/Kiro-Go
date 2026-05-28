@@ -173,6 +173,7 @@ func StartDeviceCodeFlow() (*DeviceCodeResponse, error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
@@ -215,6 +216,7 @@ func PollDeviceCode(deviceAuthID, userCode string) (*DeviceCodePollResult, error
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := defaultHTTPClient.Do(req)
 	if err != nil {
@@ -328,6 +330,8 @@ func httpPostForm(tokenURL string, data url.Values) (*http.Response, error) {
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Originator", "codex_cli_rs")
 	return defaultHTTPClient.Do(req)
 }
 
