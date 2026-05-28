@@ -134,21 +134,24 @@
     const wrap = select && select.__customSelect;
     if (!wrap) return;
     const value = wrap.querySelector('.custom-select-value');
-    const trigger = wrap.querySelector('.custom-select-trigger');
+    const trigger = wrap.__triggerEl;
+    const content = wrap.__contentEl;
     if (value) value.textContent = getCustomSelectLabel(select);
     if (trigger) trigger.disabled = select.disabled;
     wrap.classList.toggle('is-disabled', select.disabled);
-    qsa('.custom-select-option', wrap).forEach(option => {
-      const selected = option.dataset.index === String(select.selectedIndex);
-      option.classList.toggle('is-selected', selected);
-      option.setAttribute('aria-selected', String(selected));
-    });
+    if (content) {
+      qsa('.custom-select-option', content).forEach(option => {
+        const selected = option.dataset.index === String(select.selectedIndex);
+        option.classList.toggle('is-selected', selected);
+        option.setAttribute('aria-selected', String(selected));
+      });
+    }
   }
   function renderCustomSelectOptions(select) {
     const wrap = select && select.__customSelect;
     if (!wrap) return;
-    const content = wrap.querySelector('.custom-select-content');
-    const trigger = wrap.querySelector('.custom-select-trigger');
+    const content = wrap.__contentEl;
+    const trigger = wrap.__triggerEl;
     if (!content) return;
     if (trigger) labelCustomSelect(select, trigger, content, select.id);
     content.innerHTML = '';
@@ -167,8 +170,8 @@
   function placeCustomSelectContent(select) {
     const wrap = select && select.__customSelect;
     if (!wrap || !wrap.classList.contains('is-open')) return;
-    const trigger = wrap.querySelector('.custom-select-trigger');
-    const content = wrap.querySelector('.custom-select-content');
+    const trigger = wrap.__triggerEl;
+    const content = wrap.__contentEl;
     if (!trigger || !content) return;
     const rect = trigger.getBoundingClientRect();
     const gap = 4;
@@ -186,14 +189,15 @@
   function setCustomSelectOpen(select, open) {
     const wrap = select && select.__customSelect;
     if (!wrap) return;
-    const trigger = wrap.querySelector('.custom-select-trigger');
-    const content = wrap.querySelector('.custom-select-content');
+    const trigger = wrap.__triggerEl;
+    const content = wrap.__contentEl;
     if (!trigger || !content) return;
     if (open && !select.disabled) {
       closeAllCustomSelects(select);
       renderCustomSelectOptions(select);
       wrap.classList.add('is-open');
       trigger.setAttribute('aria-expanded', 'true');
+      if (content.parentNode !== document.body) document.body.appendChild(content);
       content.hidden = false;
       placeCustomSelectContent(select);
       requestAnimationFrame(() => placeCustomSelectContent(select));
@@ -218,7 +222,7 @@
     select.dispatchEvent(new Event('change', { bubbles: true }));
     syncCustomSelect(select);
     setCustomSelectOpen(select, false);
-    const trigger = select.__customSelect && select.__customSelect.querySelector('.custom-select-trigger');
+    const trigger = select.__customSelect && select.__customSelect.__triggerEl;
     if (trigger && trigger.isConnected) trigger.focus({ preventScroll: true });
   }
   function focusSiblingCustomOption(current, dir) {
@@ -285,6 +289,9 @@
     select.tabIndex = -1;
     select.__customSelect = wrap;
     wrap.__nativeSelect = select;
+    wrap.__triggerEl = trigger;
+    wrap.__contentEl = content;
+    content.__ownerWrap = wrap;
 
     trigger.addEventListener('click', () => setCustomSelectOpen(select, !wrap.classList.contains('is-open')));
     trigger.addEventListener('keydown', e => {
@@ -3237,7 +3244,7 @@
     if (checkUpdateBtn) checkUpdateBtn.addEventListener('click', () => checkUpdate(true));
 
     document.body.addEventListener('click', e => {
-      if (!e.target.closest('.custom-select')) closeAllCustomSelects();
+      if (!e.target.closest('.custom-select') && !e.target.closest('.custom-select-content')) closeAllCustomSelects();
       const lb = e.target.closest('.lang-btn');
       if (lb) setLang(lb.dataset.lang);
       const lt = e.target.closest('.lang-toggle');
