@@ -9,6 +9,7 @@
   <script src="/admin/vendor/tailwindcss-browser/index.global.js"></script>
   <link rel="stylesheet" href="/admin/vendor/fontawesome/css/all.min.css" />
   <link rel="stylesheet" href="/admin/styles.css" id="__cssAsset" />
+  <link rel="stylesheet" href="/admin/theme-glass.css" id="__themeCss" />
   <link rel="stylesheet" href="/admin/toast.css" id="__toastCss" />
   <script>
     (function () {
@@ -16,6 +17,8 @@
       window.__v = v;
       var css = document.getElementById('__cssAsset');
       if (css) css.href = '/admin/styles.css?v=' + v;
+      var theme = document.getElementById('__themeCss');
+      if (theme) theme.href = '/admin/theme-glass.css?v=' + v;
       var tcss = document.getElementById('__toastCss');
       if (tcss) tcss.href = '/admin/toast.css?v=' + v;
     })();

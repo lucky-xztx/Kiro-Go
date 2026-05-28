@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kiro-Go</title>
+  <link rel="icon" type="image/x-icon" href="/admin/favicon.ico" />
+  <link rel="stylesheet" href="/admin/home.css" id="__homeCss" />
+  <script>
+    (function () {
+      var v = Date.now();
+      window.__v = v;
+      var css = document.getElementById('__homeCss');
+      if (css) css.href = '/admin/home.css?v=' + v;
+    })();
+  </script>
+</head>
+
+<body>
+  <div class="copied-toast" id="toast">已复制到剪贴板</div>
+
+  <div class="page">
+    <header class="hero">
+      <div class="hero-brand">
+        <img class="hero-logo" src="/admin/favicon.ico" alt="Kiro-Go" />
+        <h1 id="serverName">Kiro-Go</h1>
+      </div>
+      <p class="subtitle">Claude / OpenAI 双协议兼容的 Kiro API 中转服务</p>
+      <a class="hero-link" href="/admin" target="_self">
+        <span>进入管理面板</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M13 5l7 7-7 7" />
+        </svg>
+      </a>
+    </header>
+
+    <section class="card">
+      <h2>接入信息</h2>
+      <div class="info-row">
+        <span class="info-label">Claude</span>
+        <div class="info-value mono" id="claudeUrl" data-copy>-</div>
+      </div>
+      <div class="info-row">
+        <span class="info-label">OpenAI</span>
+        <div class="info-value mono" id="openaiUrl" data-copy>-</div>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Models</span>
+        <div class="info-value mono" id="modelsUrl" data-copy>-</div>
+      </div>
+      <div class="info-row" style="margin-top:18px">
+        <span class="info-label">密钥</span>
+        <div class="info-value muted" id="apiKeyHint">由管理员在后台分配</div>
+      </div>
+      <div class="info-row" style="margin-top:18px;align-items:flex-start">
+        <span class="info-label">模型</span>
+        <div class="models-list" id="modelsList">
+          <span class="no-models">加载中...</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>服务状态</h2>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="uptime">-</div>
+          <div class="stat-label">运行时间</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="modelCount">-</div>
+          <div class="stat-label">可用模型</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="successRate">-</div>
+          <div class="stat-label">成功率</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="totalCalls">-</div>
+          <div class="stat-label">调用次数</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="totalTokens">-</div>
+          <div class="stat-label">已用 Token</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="accountsCount">-</div>
+          <div class="stat-label">在线账号</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="hero-footer">
+      <span>Powered by Kiro-Go</span>
+      <span class="dot">·</span>
+      <span id="versionTag">v-</span>
+      <span class="dot">·</span>
+      <a href="https://github.com/Quorinex/Kiro-Go" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+  </div>
+
+  <script src="/admin/home.js?v=__V__"></script>
+  <script>
+    (function () {
+      var s = document.querySelector('script[src^="/admin/home.js"]');
+      if (s) s.src = '/admin/home.js?v=' + (window.__v || Date.now());
+    })();
+  </script>
+</body>
+
+</html>

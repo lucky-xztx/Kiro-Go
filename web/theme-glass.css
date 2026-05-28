@@ -1,0 +1,421 @@
+/* Kiro-Go admin glass theme.
+ * Layered on top of styles.css. Aligns the admin panel with the public
+ * homepage: gradient backdrop, frosted cards, purple accents.
+ * Loads after styles.css so its rules win on tied specificity.
+ */
+
+:root {
+  --kg-purple: #a855f7;
+  --kg-purple-strong: #6d28d9;
+  --kg-purple-soft: rgba(168, 85, 247, 0.15);
+  --kg-glass-bg: rgba(255, 255, 255, 0.55);
+  --kg-glass-border: rgba(255, 255, 255, 0.7);
+  --kg-glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --kg-text: #1a1a2e;
+  --kg-text-muted: #4a4a6a;
+}
+
+.dark {
+  --kg-glass-bg: rgba(20, 18, 38, 0.55);
+  --kg-glass-border: rgba(255, 255, 255, 0.12);
+  --kg-glass-bg-strong: rgba(28, 24, 48, 0.78);
+  --kg-text: #f4f3ff;
+  --kg-text-muted: #b8b3d6;
+}
+
+/* Animated gradient background — applied to body so it covers login + main. */
+html,
+body {
+  background: transparent !important;
+}
+
+body {
+  position: relative;
+  min-height: 100vh;
+  background: linear-gradient(
+    135deg,
+    #a855f7 0%,
+    #ec4899 25%,
+    #f0f0ff 50%,
+    #3b82f6 75%,
+    #a855f7 100%
+  ) !important;
+  background-size: 400% 400% !important;
+  animation: kgGradientShift 18s ease infinite !important;
+}
+
+.dark body {
+  background: linear-gradient(
+    135deg,
+    #2d1b69 0%,
+    #4c1d95 25%,
+    #1e1b4b 50%,
+    #1e3a8a 75%,
+    #2d1b69 100%
+  ) !important;
+  background-size: 400% 400% !important;
+}
+
+@keyframes kgGradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Containers stay readable on the gradient. */
+#mainPage,
+#loginPage {
+  background: transparent;
+}
+
+.container {
+  position: relative;
+  z-index: 1;
+}
+
+/* Cards — frosted glass. */
+.card,
+.api-card {
+  background: var(--kg-glass-bg) !important;
+  border: 1px solid var(--kg-glass-border) !important;
+  border-radius: 16px !important;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  box-shadow: 0 8px 32px rgba(31, 27, 65, 0.08) !important;
+}
+
+.dark .card,
+.dark .api-card {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32) !important;
+}
+
+.card-header {
+  border-bottom: 1px solid rgba(168, 85, 247, 0.15) !important;
+}
+
+.dark .card-header {
+  border-bottom-color: rgba(168, 132, 255, 0.18) !important;
+}
+
+.card-title {
+  color: var(--kg-text) !important;
+  letter-spacing: 0.005em;
+}
+
+/* Stat cards — punchier. */
+.stats-grid .stat-card {
+  background: var(--kg-glass-bg) !important;
+  border: 1px solid var(--kg-glass-border) !important;
+  border-radius: 16px !important;
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.stats-grid .stat-card .stat-value {
+  color: var(--kg-purple-strong);
+}
+
+.dark .stats-grid .stat-card .stat-value {
+  color: #c4b5fd;
+}
+
+.stats-grid .stat-card .stat-icon {
+  color: var(--kg-purple);
+  opacity: 0.65;
+}
+
+.stat-value--danger,
+.stat-icon--danger {
+  color: #dc2626 !important;
+}
+
+.dark .stat-value--danger,
+.dark .stat-icon--danger {
+  color: #fca5a5 !important;
+}
+
+/* Header — translucent strip. */
+.app-header {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5) !important;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.dark .app-header {
+  background: rgba(20, 18, 38, 0.55) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.brand-text {
+  color: var(--kg-text);
+}
+
+/* Tabs — pill style + purple active. */
+.tab.active {
+  color: var(--kg-purple-strong) !important;
+  background: rgba(168, 85, 247, 0.12) !important;
+  border-radius: 999px !important;
+}
+
+.dark .tab.active {
+  color: #d8b4fe !important;
+  background: rgba(168, 132, 255, 0.18) !important;
+}
+
+.tab:hover {
+  background: rgba(168, 85, 247, 0.06) !important;
+  border-radius: 999px !important;
+}
+
+/* Buttons — primary becomes the gradient pill. */
+.btn-primary {
+  background: linear-gradient(135deg, #a855f7, #6366f1) !important;
+  border-color: transparent !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.28) !important;
+  -webkit-box-shadow: 0 4px 14px rgba(99, 102, 241, 0.28) !important;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #9333ea, #4f46e5) !important;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.42) !important;
+  -webkit-box-shadow: 0 6px 18px rgba(99, 102, 241, 0.42) !important;
+  transform: translateY(-1px);
+}
+
+.btn-outline {
+  background: rgba(255, 255, 255, 0.45) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  color: var(--kg-text) !important;
+}
+
+.btn-outline:hover {
+  background: rgba(255, 255, 255, 0.7) !important;
+  border-color: var(--kg-purple) !important;
+  color: var(--kg-purple-strong) !important;
+}
+
+.dark .btn-outline {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  color: var(--kg-text) !important;
+}
+
+.dark .btn-outline:hover {
+  background: rgba(168, 132, 255, 0.15) !important;
+  border-color: rgba(168, 132, 255, 0.5) !important;
+  color: #d8b4fe !important;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.dark .btn-secondary {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+/* Inputs — frosted. */
+.input,
+input:not([type="checkbox"]):not([type="radio"]),
+textarea,
+select,
+.custom-select-trigger {
+  background: rgba(255, 255, 255, 0.55) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+  color: var(--kg-text) !important;
+}
+
+.dark .input,
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea,
+.dark select,
+.dark .custom-select-trigger {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.input:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus,
+textarea:focus,
+select:focus,
+.custom-select.is-open .custom-select-trigger {
+  border-color: var(--kg-purple) !important;
+  box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18) !important;
+  -webkit-box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.18) !important;
+}
+
+/* Custom select content — keep it readable on the gradient. */
+.custom-select-content {
+  background: var(--kg-glass-bg-strong) !important;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-color: rgba(168, 85, 247, 0.25) !important;
+  box-shadow: 0 12px 32px rgba(31, 27, 65, 0.18) !important;
+  -webkit-box-shadow: 0 12px 32px rgba(31, 27, 65, 0.18) !important;
+}
+
+.custom-select-option:hover,
+.custom-select-option:focus-visible,
+.custom-select-option.is-selected {
+  background: var(--kg-purple-soft) !important;
+  color: var(--kg-purple-strong) !important;
+}
+
+/* Switch — purple when on. */
+.switch input:checked + .slider {
+  background: var(--kg-purple) !important;
+}
+
+/* Login — glass card on the same gradient. */
+.login-wrapper {
+  background: transparent !important;
+}
+
+.login-topbar {
+  background: rgba(255, 255, 255, 0.35) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.dark .login-topbar {
+  background: rgba(20, 18, 38, 0.55) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.login-box {
+  background: var(--kg-glass-bg-strong) !important;
+  border: 1px solid var(--kg-glass-border) !important;
+  border-radius: 18px !important;
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 16px 48px rgba(31, 27, 65, 0.18) !important;
+  -webkit-box-shadow: 0 16px 48px rgba(31, 27, 65, 0.18) !important;
+}
+
+.login-title {
+  background: linear-gradient(135deg, #a855f7, #6366f1, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Hide ghost flock — the gradient already does the heavy lifting. */
+.ghost-bg {
+  display: none !important;
+}
+
+/* API tab — endpoint rows. */
+.api-pill {
+  background: var(--kg-purple-soft) !important;
+  color: var(--kg-purple-strong) !important;
+  border-color: transparent !important;
+}
+
+.api-endpoint-icon {
+  background: var(--kg-purple-soft) !important;
+  color: var(--kg-purple-strong) !important;
+}
+
+.api-code-row {
+  background: rgba(255, 255, 255, 0.5) !important;
+  border-color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.dark .api-code-row {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Footer — sit gracefully on the gradient. */
+.app-footer {
+  background: transparent !important;
+}
+
+.footer-link {
+  background: rgba(255, 255, 255, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.footer-link:hover {
+  background: rgba(255, 255, 255, 0.6) !important;
+  color: var(--kg-purple-strong) !important;
+  border-color: var(--kg-purple) !important;
+}
+
+.dark .footer-link {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Modals — frosted backdrop. */
+.modal-content {
+  background: var(--kg-glass-bg-strong) !important;
+  border: 1px solid var(--kg-glass-border) !important;
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border-radius: 16px !important;
+  box-shadow: 0 18px 52px rgba(31, 27, 65, 0.25) !important;
+  -webkit-box-shadow: 0 18px 52px rgba(31, 27, 65, 0.25) !important;
+}
+
+/* Lang switch + theme toggle — translucent pill. */
+.lang-switch,
+.theme-toggle {
+  background: rgba(255, 255, 255, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+}
+
+.dark .lang-switch,
+.dark .theme-toggle {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.lang-btn.active {
+  background: linear-gradient(135deg, #a855f7, #6366f1) !important;
+  color: #ffffff !important;
+}
+
+/* Toolbar — translucent. */
+.toolbar {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+  border-radius: 12px !important;
+}
+
+.dark .toolbar {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Account row — let cards shine. */
+.account-item,
+.api-key-item {
+  background: rgba(255, 255, 255, 0.32) !important;
+  border-color: rgba(255, 255, 255, 0.55) !important;
+  border-radius: 12px !important;
+}
+
+.dark .account-item,
+.dark .api-key-item {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Logout button keeps red but with the new shape. */
+#logoutBtn,
+#logoutBtn:hover {
+  border-radius: 8px !important;
+}

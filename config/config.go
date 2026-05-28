@@ -257,7 +257,7 @@ func Load() error {
 			// Create default configuration.
 			// Binds to 0.0.0.0 by default for Docker/container compatibility.
 			cfg = &Config{
-				Password:      "changeme",
+				Password:      "xiaozhou",
 				Port:          8080,
 				Host:          "0.0.0.0",
 				RequireApiKey: false,

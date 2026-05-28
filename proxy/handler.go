@@ -394,9 +394,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/admin/"):
 		h.serveStaticFile(w, r)
 
+	// 公开统计（首页用，无需鉴权，只暴露非敏感字段）
+	case path == "/api/public/stats":
+		h.handlePublicStats(w, r)
+
 	// 健康检查
-	case path == "/health" || path == "/":
+	case path == "/health":
 		h.handleHealth(w, r)
+
+	// 首页
+	case path == "/":
+		h.serveHomePage(w, r)
 
 	// 统计端点（需要 API Key 鉴权）
 	case path == "/v1/stats":
@@ -3317,9 +3325,55 @@ func (h *Handler) serveAdminPage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "web/index.html")
 }
 
+func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "web/home.html")
+}
+
 func (h *Handler) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/admin/")
 	http.ServeFile(w, r, "web/"+path)
+}
+
+// handlePublicStats 首页用的公开统计：只暴露非敏感字段。
+func (h *Handler) handlePublicStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	total := atomic.LoadInt64(&h.totalRequests)
+	success := atomic.LoadInt64(&h.successRequests)
+	failed := atomic.LoadInt64(&h.failedRequests)
+	tokens := atomic.LoadInt64(&h.totalTokens)
+
+	// successRate: 已完成的请求里的成功比例。total 仅作兜底分母。
+	var rate int
+	denom := success + failed
+	if denom == 0 {
+		denom = total
+	}
+	if denom > 0 {
+		rate = int((float64(success) / float64(denom)) * 100)
+		if rate > 100 {
+			rate = 100
+		}
+		if rate < 0 {
+			rate = 0
+		}
+	}
+
+	// 模型数（基于缓存）
+	h.modelsCacheMu.RLock()
+	modelCount := len(h.cachedModels)
+	h.modelsCacheMu.RUnlock()
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"name":          "Kiro-Go",
+		"version":       config.Version,
+		"uptime":        time.Now().Unix() - h.startTime,
+		"accounts":      h.pool.AvailableCount(),
+		"modelCount":    modelCount,
+		"successRate":   rate,
+		"totalRequests": total,
+		"totalTokens":   tokens,
+	})
 }
 
 // apiGetThinkingConfig 获取 thinking 配置
