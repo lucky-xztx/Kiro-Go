@@ -144,46 +144,6 @@
       });
   }
 
-  function loadModels() {
-    var listEl = $("modelsList");
-    fetch("/v1/models")
-      .then(function (r) {
-        return r.ok ? r.json() : Promise.reject(r.status);
-      })
-      .then(function (data) {
-        var models = (data && data.data) || [];
-        if (!models.length) {
-          listEl.innerHTML = '<span class="no-models">暂无可用模型</span>';
-          return;
-        }
-        var ids = [];
-        var seen = {};
-        models.forEach(function (m) {
-          var id = m && m.id;
-          if (!id || seen[id]) return;
-          seen[id] = true;
-          ids.push(id);
-        });
-        listEl.innerHTML = ids
-          .map(function (id) {
-            var safe = escapeHTML(id);
-            return '<span class="model-tag" data-model="' + safe + '">' + safe + "</span>";
-          })
-          .join("");
-        listEl.querySelectorAll(".model-tag").forEach(function (tag) {
-          tag.addEventListener("click", function () {
-            var name = tag.getAttribute("data-model");
-            safeCopy(name).then(function () {
-              showToast("已复制：" + name);
-            });
-          });
-        });
-      })
-      .catch(function () {
-        listEl.innerHTML = '<span class="no-models">加载失败</span>';
-      });
-  }
-
   /* ---------------------- Auth ---------------------- */
 
   function api(path, opts) {
@@ -235,14 +195,6 @@
     if (entry) {
       if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
       else entry.setAttribute("hidden", "");
-    }
-    var hint = $("apiKeyHint");
-    if (hint) {
-      if (currentUser) {
-        hint.textContent = "在下方「我的 API Key」中生成专属 Key";
-      } else {
-        hint.textContent = "登录后即可生成专属 API Key";
-      }
     }
     var card = $("myKeysCard");
     if (card) {
@@ -505,7 +457,6 @@
     setEndpoints();
     bindCopy();
     loadStatus();
-    loadModels();
     bindAuthModal();
     bindKeyControls();
     loadMe();
