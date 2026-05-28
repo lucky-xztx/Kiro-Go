@@ -47,6 +47,7 @@ type Account struct {
 	ClientSecret string `json:"clientSecret,omitempty"` // OIDC client secret (for IdC auth)
 	AuthMethod   string `json:"authMethod"`             // Authentication method: "idc" (AWS IdC) or "social" (GitHub/Google)
 	Provider     string `json:"provider,omitempty"`     // Identity provider name (e.g., "BuilderId", "GitHub")
+	Upstream     string `json:"upstream,omitempty"`     // Upstream service this account proxies to: "kiro" (default), "codex", "claude-code", "gemini" — only "kiro" is wired today; others reserved for routing.
 	Region       string `json:"region"`                 // AWS region for OIDC endpoints
 	StartUrl     string `json:"startUrl,omitempty"`     // AWS SSO start URL
 	ExpiresAt    int64  `json:"expiresAt,omitempty"`    // Token expiration timestamp (Unix seconds)

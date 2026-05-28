@@ -27,14 +27,10 @@ func mustInitConfig(t *testing.T) {
 	}
 }
 
-// requireAuth flips the master gate on. Auth is now opt-in via RequireApiKey
-// so most tests need this after seeding their keys.
+// requireAuth was the master-gate toggle in the old design. Auth is now
+// always required, so this is kept as a no-op to avoid churning every test.
 func requireAuth(t *testing.T) {
 	t.Helper()
-	on := true
-	if err := config.UpdateSettingsPatch(nil, &on, ""); err != nil {
-		t.Fatalf("set requireApiKey=true: %v", err)
-	}
 }
 
 func TestAuthenticateRejectsMissingKey(t *testing.T) {
@@ -202,17 +198,18 @@ func TestAuthenticateLegacyFallback(t *testing.T) {
 	}
 }
 
-func TestAuthenticateNoAuthRequired(t *testing.T) {
+// Auth is now always required — no keys + no header means 401, period.
+func TestAuthenticateAlwaysRequired(t *testing.T) {
 	mustInitConfig(t)
-	// No keys configured, RequireApiKey defaults to false.
 	h := &Handler{}
 	r := newAuthTestRequest(t, "", "")
-	entry, _, err := h.authenticate(r)
-	if err != nil {
-		t.Fatalf("expected open access when no keys configured: %v", err)
+	_, _, err := h.authenticate(r)
+	if err == nil {
+		t.Fatalf("expected auth required even with no keys configured")
 	}
-	if entry != nil {
-		t.Fatalf("expected nil entry when no key configured, got %v", entry)
+	ae, ok := err.(*authError)
+	if !ok || ae.status != http.StatusUnauthorized {
+		t.Fatalf("expected 401 authError, got %v", err)
 	}
 }
 
@@ -308,23 +305,20 @@ func TestRecordSuccessForApiKeyEmptyIDIsNoop(t *testing.T) {
 	}
 }
 
-// Public deployments (RequireApiKey=false) must keep accepting all requests
-// even after keys exist in the config — e.g. an operator drafted some keys
-// but hasn't flipped the gate yet, or the legacy migration left a disabled
-// entry behind.
-func TestAuthenticateMasterSwitchOffPassesThrough(t *testing.T) {
+// Auth is always required — even when no keys are configured the request
+// must be rejected.
+func TestAuthenticateRejectsAlwaysWithoutKey(t *testing.T) {
 	mustInitConfig(t)
 	if _, err := config.AddApiKey(config.ApiKeyEntry{Name: "drafted", Key: "sk-drafted", Enabled: true}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	// RequireApiKey defaults to false — do not flip it on.
 
 	h := &Handler{}
-	if entry, _, err := h.authenticate(newAuthTestRequest(t, "", "")); err != nil || entry != nil {
-		t.Fatalf("expected open access without entry, got entry=%v err=%v", entry, err)
+	if _, _, err := h.authenticate(newAuthTestRequest(t, "", "")); err == nil {
+		t.Fatalf("expected unauthenticated request to be rejected")
 	}
-	if entry, _, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer sk-anything")); err != nil || entry != nil {
-		t.Fatalf("expected provided key to be ignored when gate is off, got entry=%v err=%v", entry, err)
+	if _, _, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer sk-anything")); err == nil {
+		t.Fatalf("expected unknown key to be rejected")
 	}
 }
 

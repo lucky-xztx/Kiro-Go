@@ -42,28 +42,15 @@ func extractProvidedKey(r *http.Request) string {
 
 // authenticate validates an incoming request against the configured API keys.
 //
-// Master switch: config.RequireApiKey. When false AND no per-user keys have
-// been issued, requests pass without checking any keys. Once any user has
-// generated a key, auth is implicitly required (otherwise the generated keys
-// would be useless).
-//
-// When auth is required:
-//  1. The provided key is looked up in the SQLite per-user key store first.
-//     If found, enabled, and within quota, the request is authorized.
-//  2. Otherwise the legacy config.ApiKeys list is consulted (mostly empty
-//     after migration, kept as a safety net).
-//  3. Otherwise the legacy single config.ApiKey field is checked.
-//  4. Otherwise the request is rejected.
+// Auth is now ALWAYS required. Resolution order:
+//  1. SQLite per-user key store (where every Key issued via the UI lives).
+//  2. Legacy config.ApiKeys list (only present briefly before migration runs).
+//  3. Legacy single config.ApiKey field (oldest deployments).
 //
 // Returns (legacyEntry, contextualizedRequest, nil) on success. legacyEntry is
 // non-nil only when the key matched a legacy config entry; for user keys, the
 // returned request carries the matched key ID in its context.
 func (h *Handler) authenticate(r *http.Request) (*config.ApiKeyEntry, *http.Request, error) {
-	required := config.IsApiKeyRequired() || h.hasAnyUserApiKeys()
-	if !required {
-		return nil, r, nil
-	}
-
 	provided := extractProvidedKey(r)
 	if provided == "" {
 		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
@@ -107,18 +94,14 @@ func (h *Handler) authenticate(r *http.Request) (*config.ApiKeyEntry, *http.Requ
 
 	// Legacy single-key path.
 	expected := config.GetApiKey()
-	if expected == "" {
-		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "API key authentication is required but no keys are configured")
-	}
-	if provided != expected {
+	if expected == "" || provided != expected {
 		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
 	}
 	return nil, r, nil
 }
 
 // hasAnyUserApiKeys reports whether at least one user-issued API key exists.
-// Errors fall closed (returns true) so a transient DB failure doesn't accidentally
-// open the API.
+// Kept for diagnostics; auth no longer depends on this.
 func (h *Handler) hasAnyUserApiKeys() bool {
 	keys, err := store.ListAllApiKeys()
 	if err != nil {

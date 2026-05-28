@@ -68,6 +68,14 @@
         <h1 class="login-title" data-i18n="login.title"></h1>
         <p class="login-subtitle" data-i18n="login.subtitle"></p>
         <div class="form-group">
+          <label data-i18n="login.username"></label>
+          <div class="input-affix">
+            <i class="fa-solid fa-user affix-icon"></i>
+            <input type="text" id="usernameField" data-i18n-placeholder="login.usernamePlaceholder"
+              autocomplete="username" />
+          </div>
+        </div>
+        <div class="form-group">
           <label data-i18n="login.password"></label>
           <div class="input-affix">
             <i class="fa-solid fa-lock affix-icon"></i>
@@ -83,10 +91,12 @@
           <span class="remember-box" aria-hidden="true"><i class="fa-solid fa-check"></i></span>
           <span class="remember-label" data-i18n="login.remember"></span>
         </label>
+        <p class="auth-error" id="loginError"></p>
         <button type="button" class="btn btn-primary btn-lg w-full" id="loginBtn">
           <i class="fa-solid fa-arrow-right-to-bracket"></i>
           <span data-i18n="login.submit"></span>
         </button>
+        <p class="login-hint" data-i18n="login.hint"></p>
 
       </div>
     </main>
@@ -94,45 +104,78 @@
 
   <!-- Main app -->
   <div id="mainPage" class="hidden">
-    <header class="app-header">
-      <div class="app-header-inner">
-        <div class="brand-wrap">
-          <div class="brand">
-            <img class="brand-icon" src="/admin/favicon.ico" alt="" />
-            <span class="brand-text">Kiro-Go</span>
-          </div>
+    <div class="app-shell">
+      <aside class="app-sidebar" id="appSidebar">
+        <div class="sidebar-brand">
+          <img class="brand-icon" src="/admin/favicon.ico" alt="" />
+          <span class="brand-text">Kiro-Go</span>
         </div>
-        <nav class="header-nav" aria-label="" data-i18n-aria-label="aria.sections">
+        <nav class="sidebar-nav" aria-label="" data-i18n-aria-label="aria.sections">
           <div class="tabs" id="tabBar">
-            <button type="button" class="tab active" data-tab="accounts"><i class="fa-solid fa-users tab-icon"></i><span
-                data-i18n="tabs.accounts"></span></button>
-            <button type="button" class="tab" data-tab="settings"><i class="fa-solid fa-sliders tab-icon"></i><span
-                data-i18n="tabs.settings"></span></button>
-            <button type="button" class="tab" data-tab="api"><i class="fa-solid fa-plug tab-icon"></i><span
-                data-i18n="tabs.api"></span></button>
+            <button type="button" class="tab active" data-tab="accounts">
+              <i class="fa-solid fa-users tab-icon"></i>
+              <span data-i18n="tabs.accounts"></span>
+            </button>
+            <button type="button" class="tab" data-tab="users" data-admin-only>
+              <i class="fa-solid fa-user-gear tab-icon"></i>
+              <span data-i18n="tabs.users"></span>
+            </button>
+            <button type="button" class="tab" data-tab="logs" data-admin-only>
+              <i class="fa-solid fa-clipboard-list tab-icon"></i>
+              <span data-i18n="tabs.logs"></span>
+            </button>
+            <button type="button" class="tab" data-tab="aliases" data-admin-only>
+              <i class="fa-solid fa-tags tab-icon"></i>
+              <span data-i18n="tabs.aliases"></span>
+            </button>
+            <button type="button" class="tab" data-tab="health" data-admin-only>
+              <i class="fa-solid fa-heart-pulse tab-icon"></i>
+              <span data-i18n="tabs.health"></span>
+            </button>
+            <button type="button" class="tab" data-tab="settings">
+              <i class="fa-solid fa-sliders tab-icon"></i>
+              <span data-i18n="tabs.settings"></span>
+            </button>
+            <button type="button" class="tab" data-tab="api">
+              <i class="fa-solid fa-plug tab-icon"></i>
+              <span data-i18n="tabs.api"></span>
+            </button>
           </div>
         </nav>
-        <div class="topbar-actions flex-wrap justify-end">
-          <div class="lang-switch" id="mainLangSwitch" role="group" aria-label="" data-i18n-aria-label="lang.label">
-            <button class="lang-btn" data-lang="zh" type="button" data-i18n="lang.zh"></button>
-            <button class="lang-btn" data-lang="en" type="button" data-i18n="lang.en"></button>
+        <div class="sidebar-footer">
+          <div class="user-chip" id="currentUserChip">
+            <span class="role-badge" id="currentUserRole">USER</span>
+            <span class="user-chip-name" id="currentUserName">-</span>
           </div>
-          <button id="mainThemeToggle" class="icon-btn theme-toggle" type="button" aria-label=""
-            data-i18n-title="theme.toggle" data-i18n-aria-label="theme.toggle" data-theme="system">
-            <i class="fa-solid fa-circle-half-stroke theme-ico-system"></i>
-            <i class="fa-solid fa-sun theme-ico-light"></i>
-            <i class="fa-solid fa-moon theme-ico-dark"></i>
-          </button>
-          <span class="divider" aria-hidden="true"></span>
-          <button class="btn btn-outline btn-sm" id="logoutBtn">
-            <i class="fa-solid fa-right-from-bracket"></i>
-            <span data-i18n="common.logout"></span>
-          </button>
+          <div class="sidebar-actions">
+            <div class="lang-switch" id="mainLangSwitch" role="group" aria-label=""
+              data-i18n-aria-label="lang.label">
+              <button class="lang-btn" data-lang="zh" type="button" data-i18n="lang.zh"></button>
+              <button class="lang-btn" data-lang="en" type="button" data-i18n="lang.en"></button>
+            </div>
+            <button id="mainThemeToggle" class="icon-btn theme-toggle" type="button" aria-label=""
+              data-i18n-title="theme.toggle" data-i18n-aria-label="theme.toggle" data-theme="system">
+              <i class="fa-solid fa-circle-half-stroke theme-ico-system"></i>
+              <i class="fa-solid fa-sun theme-ico-light"></i>
+              <i class="fa-solid fa-moon theme-ico-dark"></i>
+            </button>
+            <button class="btn btn-outline btn-sm" id="logoutBtn">
+              <i class="fa-solid fa-right-from-bracket"></i>
+              <span data-i18n="common.logout"></span>
+            </button>
+          </div>
         </div>
-      </div>
-    </header>
+      </aside>
 
-    <div class="container">
+      <main class="app-main">
+        <header class="app-main-bar">
+          <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <h1 class="app-main-title" id="currentTabTitle" data-i18n="tabs.accounts"></h1>
+        </header>
+
+        <div class="container">
       <!-- Stats summary -->
       <div class="stats-grid">
         <div class="stat-card">
@@ -239,13 +282,8 @@
         <div class="card">
           <div class="card-header"><span class="card-title" data-i18n="settings.apiSettings"></span></div>
           <div class="form-group">
-            <label class="flex items-center gap-2">
-              <span class="switch"><input type="checkbox" id="requireApiKey" /><span class="slider"></span></span>
-              <span data-i18n="settings.enableApiKey"></span>
-            </label>
-            <small data-i18n="apiKeys.requireHint"></small>
+            <small data-i18n="apiKeys.alwaysOnHint"></small>
           </div>
-          <button class="btn btn-primary btn-sm" id="saveRequireApiKeyBtn" data-i18n="settings.saveApiKey"></button>
 
           <div class="form-group" style="margin-top: 1rem;">
             <div class="flex items-center gap-2" style="justify-content: space-between;">
@@ -488,6 +526,92 @@
           <p class="api-hint"><i class="fa-solid fa-key"></i><span data-i18n="api.statsHint"></span></p>
         </section>
       </div>
+
+      <!-- Users tab (admin only) -->
+      <div id="tabUsers" class="tab-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="users.title"></span>
+            <div class="card-actions">
+              <button class="btn btn-outline btn-sm" id="refreshUsersBtn"><i class="fa-solid fa-arrows-rotate"></i><span class="btn-text" data-i18n="common.refresh"></span></button>
+              <button class="btn btn-primary btn-sm" id="addUserBtn"><i class="fa-solid fa-user-plus"></i><span class="btn-text" data-i18n="users.add"></span></button>
+            </div>
+          </div>
+          <div id="usersList"></div>
+        </div>
+      </div>
+
+      <!-- Logs tab -->
+      <div id="tabLogs" class="tab-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="logs.title"></span>
+            <div class="card-actions">
+              <button class="btn btn-outline btn-sm" id="refreshLogsBtn"><i class="fa-solid fa-arrows-rotate"></i><span class="btn-text" data-i18n="common.refresh"></span></button>
+            </div>
+          </div>
+          <div class="toolbar">
+            <input type="text" id="logFilterApiKeyId" data-i18n-placeholder="logs.filterApiKeyId" />
+            <input type="text" id="logFilterAccountId" data-i18n-placeholder="logs.filterAccountId" />
+            <input type="number" id="logFilterLimit" min="10" max="1000" value="100" />
+          </div>
+          <div id="logsList" class="logs-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title" data-i18n="logs.usageSeriesTitle"></span></div>
+          <div class="toolbar">
+            <input type="text" id="seriesApiKeyId" data-i18n-placeholder="logs.seriesApiKeyId" />
+            <select id="seriesDays">
+              <option value="7" data-i18n="logs.days7"></option>
+              <option value="14" data-i18n="logs.days14"></option>
+              <option value="30" data-i18n="logs.days30"></option>
+            </select>
+            <button class="btn btn-outline btn-sm" id="loadSeriesBtn" type="button" data-i18n="common.refresh"></button>
+          </div>
+          <div id="usageSeries" class="usage-series"></div>
+        </div>
+      </div>
+
+      <!-- Aliases tab -->
+      <div id="tabAliases" class="tab-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="aliases.title"></span>
+            <div class="card-actions">
+              <button class="btn btn-outline btn-sm" id="refreshAliasesBtn"><i class="fa-solid fa-arrows-rotate"></i><span class="btn-text" data-i18n="common.refresh"></span></button>
+            </div>
+          </div>
+          <small data-i18n="aliases.hint"></small>
+          <div class="toolbar" style="margin-top: 12px;">
+            <input type="text" id="aliasInput" data-i18n-placeholder="aliases.aliasPlaceholder" />
+            <input type="text" id="aliasTargetInput" data-i18n-placeholder="aliases.targetPlaceholder" />
+            <select id="aliasProviderInput">
+              <option value="kiro">kiro</option>
+              <option value="codex">codex</option>
+              <option value="claude-code">claude-code</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="saveAliasBtn" type="button" data-i18n="aliases.add"></button>
+          </div>
+          <div id="aliasesList" class="aliases-list"></div>
+        </div>
+      </div>
+
+      <!-- Health tab -->
+      <div id="tabHealth" class="tab-content hidden">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title" data-i18n="health.title"></span>
+            <div class="card-actions">
+              <button class="btn btn-outline btn-sm" id="refreshHealthBtn"><i class="fa-solid fa-arrows-rotate"></i><span class="btn-text" data-i18n="common.refresh"></span></button>
+              <button class="btn btn-primary btn-sm" id="runHealthCheckBtn"><i class="fa-solid fa-stethoscope"></i><span class="btn-text" data-i18n="health.runNow"></span></button>
+            </div>
+          </div>
+          <small data-i18n="health.hint"></small>
+          <div id="healthList" class="health-list"></div>
+        </div>
+      </div>
+        </div>
+      </main>
     </div>
 
     <!-- Footer -->
@@ -634,6 +758,65 @@
         <div class="modal-footer">
           <button class="btn btn-outline" id="apiKeyShowCopyBtn" type="button" data-i18n="apiKeys.copyBtn"></button>
           <button class="btn btn-primary" id="apiKeyShowCloseBtn" type="button" data-i18n="apiKeys.closeBtn"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="userModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span class="modal-title" id="userModalTitle" data-i18n="users.modalTitle"></span>
+        <button class="modal-close" id="userModalClose" type="button" aria-label=""
+          data-i18n-aria-label="common.close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label data-i18n="users.formUsername"></label>
+          <input type="text" id="userForm_username" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label data-i18n="users.formEmail"></label>
+          <input type="email" id="userForm_email" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label data-i18n="users.formPassword"></label>
+          <input type="password" id="userForm_password" autocomplete="new-password" />
+          <small data-i18n="users.formPasswordHint"></small>
+        </div>
+        <div class="form-group">
+          <label data-i18n="users.formRole"></label>
+          <select id="userForm_role">
+            <option value="user" data-i18n="users.roleUser"></option>
+            <option value="admin" data-i18n="users.roleAdmin"></option>
+          </select>
+        </div>
+        <p class="auth-error" id="userModalError"></p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="userModalCancelBtn" type="button" data-i18n="common.cancel"></button>
+          <button class="btn btn-primary" id="userModalSaveBtn" type="button" data-i18n="common.save"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="userPasswordModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <span class="modal-title" data-i18n="users.resetPasswordTitle"></span>
+        <button class="modal-close" id="userPasswordClose" type="button" aria-label=""
+          data-i18n-aria-label="common.close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="confirm-message" id="userPasswordHint"></p>
+        <div class="form-group">
+          <label data-i18n="users.formPassword"></label>
+          <input type="password" id="userPassword_value" autocomplete="new-password" />
+        </div>
+        <p class="auth-error" id="userPasswordError"></p>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="userPasswordCancelBtn" type="button" data-i18n="common.cancel"></button>
+          <button class="btn btn-primary" id="userPasswordSaveBtn" type="button" data-i18n="common.save"></button>
         </div>
       </div>
     </div>

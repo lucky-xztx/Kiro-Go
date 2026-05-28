@@ -107,11 +107,17 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) 
 	actualModel, thinking := ParseModelAndThinking(req.Model, thinkingCfg.Suffix)
 	openaiReq.Model = actualModel
 
-	estimatedInputTokens := estimateOpenAIRequestInputTokens(openaiReq)
-	kiroPayload := OpenAIToKiro(openaiReq, thinking)
-
 	apiKeyID := activeApiKeyID(r.Context())
 	respID := generateResponseID()
+
+	// Route GPT-family models to Codex upstream
+	if isCodexModel(actualModel) {
+		h.handleResponsesViaCodex(w, &req, openaiReq, apiKeyID, respID, storedInputCopy, storeResponse)
+		return
+	}
+
+	estimatedInputTokens := estimateOpenAIRequestInputTokens(openaiReq)
+	kiroPayload := OpenAIToKiro(openaiReq, thinking)
 
 	if req.Stream {
 		h.handleResponsesStream(w, kiroPayload, actualModel, thinking, estimatedInputTokens,
@@ -186,6 +192,7 @@ func (h *Handler) handleResponsesNonStream(
 		outputTokens = estimateOpenAIOutputTokens(finalContent, reasoningContent, toolUses)
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/responses", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 
@@ -531,6 +538,7 @@ func (h *Handler) handleResponsesStream(
 		outputTokens = estimateOpenAIOutputTokens(finalContent, reasoning, toolUses)
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/responses", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 

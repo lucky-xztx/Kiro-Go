@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"kiro-go/config"
+	"kiro-go/store"
 	"regexp"
 	"strings"
 	"time"
@@ -49,8 +50,16 @@ const ThinkingModePrompt = `<thinking_mode>enabled</thinking_mode>
 const minimalFallbackUserContent = "."
 const toolResultsContinuationPrefix = "Tool results:"
 
-// ParseModelAndThinking 解析模型名称，返回实际模型和是否启用 thinking
+// ParseModelAndThinking 解析模型名称，返回实际模型和是否启用 thinking。
+// 优先匹配用户在 SQLite 中配置的 model_aliases，再走内置映射。
 func ParseModelAndThinking(model string, thinkingSuffix string) (string, bool) {
+	// User-defined alias wins. Apply it before the thinking-suffix split so
+	// admins can register e.g. "claude-opus-4.5" → "claude-sonnet-4" and the
+	// "-thinking" suffix on the alias still works.
+	if resolved := store.ResolveModel(model); resolved != "" && resolved != model {
+		model = resolved
+	}
+
 	lower := strings.ToLower(model)
 	thinking := false
 

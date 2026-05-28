@@ -10,7 +10,6 @@
     localStorage.removeItem('admin_password');
     localStorage.removeItem('admin_login_time');
   }
-  let password = sessionStorage.getItem('admin_password') || localStorage.getItem('admin_password') || '';
   let currentLang = localStorage.getItem('kiro_lang') || 'zh';
   const dict = { en: null, zh: null };
   let accountsData = [];
@@ -559,87 +558,118 @@
     return pending;
   }
 
-  // Fetch wrapper
+  // Fetch wrapper — uses session cookie set by /api/login.
   function api(path, opts) {
     opts = opts || {};
-    opts.headers = Object.assign({ 'X-Admin-Password': password }, opts.headers || {});
+    opts.credentials = 'same-origin';
+    opts.headers = Object.assign({}, opts.headers || {});
     if (opts.body && !opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
     return fetch('/admin/api' + path, opts);
   }
 
-  // Login
-  function clearActivePassword() {
+  // Plain (non-/admin/api) helper for /api/login, /api/logout, /api/me.
+  function userApi(path, opts) {
+    opts = opts || {};
+    opts.credentials = 'same-origin';
+    opts.headers = Object.assign({}, opts.headers || {});
+    if (opts.body && !opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
+    return fetch(path, opts);
+  }
+
+  // Login (kiro_session cookie based; the legacy admin_password localStorage
+  // entries are tolerated only so old tabs keep working until they re-login).
+  let currentAdminUser = null;
+  function clearStaleLegacy() {
     sessionStorage.removeItem('admin_password');
     sessionStorage.removeItem('admin_login_time');
     localStorage.removeItem('admin_password');
     localStorage.removeItem('admin_login_time');
-    password = '';
-  }
-  function getActiveLoginTime() {
-    const storage = sessionStorage.getItem('admin_password') ? sessionStorage : localStorage;
-    return parseInt(storage.getItem('admin_login_time') || '0', 10);
-  }
-  function setActivePassword(nextPassword, remember) {
-    const now = Date.now().toString();
-    password = nextPassword;
-    sessionStorage.setItem('admin_password', nextPassword);
-    sessionStorage.setItem('admin_login_time', now);
-    if (remember) {
-      localStorage.setItem('admin_password', nextPassword);
-      localStorage.setItem('admin_login_time', now);
-      localStorage.setItem('kiro_remember', '1');
-      localStorage.setItem('kiro_remembered_pwd', nextPassword);
-    } else {
-      localStorage.removeItem('admin_password');
-      localStorage.removeItem('admin_login_time');
-      localStorage.removeItem('kiro_remember');
-      localStorage.removeItem('kiro_remembered_pwd');
-    }
   }
   async function tryAutoLogin() {
-    if (!password) return;
-    const loginTime = getActiveLoginTime();
-    if (loginTime && Date.now() - loginTime > 72 * 3600 * 1000) {
-      clearActivePassword();
+    try {
+      const res = await userApi('/api/me');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data && data.user && data.user.role === 'admin') {
+        currentAdminUser = data.user;
+        showMain();
+        loadData();
+      }
+    } catch (e) { /* offline */ }
+  }
+  async function login() {
+    const username = ($('usernameField') && $('usernameField').value || '').trim();
+    const pw = $('pwdField').value;
+    const errEl = $('loginError');
+    if (errEl) errEl.textContent = '';
+    if (!username || !pw) {
+      if (errEl) errEl.textContent = t('login.missingFields');
       return;
     }
     try {
-      const res = await api('/status');
-      if (res.ok) { showMain(); loadData(); }
-    } catch (e) { }
-  }
-  async function login() {
-    password = $('pwdField').value;
-    try {
-      const res = await api('/status');
-      if (res.ok) {
-        const remember = $('rememberPwd');
-        setActivePassword(password, !!(remember && remember.checked));
-        showMain(); loadData();
-      } else {
-        toast(t('login.error'), 'error');
+      const res = await userApi('/api/login', {
+        method: 'POST',
+        body: JSON.stringify({ username: username, password: pw }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (errEl) errEl.textContent = (data && data.error && data.error.message) || t('login.error');
+        return;
       }
+      const user = data && data.user;
+      if (!user || user.role !== 'admin') {
+        if (errEl) errEl.textContent = t('login.notAdmin');
+        // Logout the non-admin session — they should use the homepage.
+        await userApi('/api/logout', { method: 'POST' });
+        return;
+      }
+      currentAdminUser = user;
+      const remember = $('rememberPwd');
+      if (remember && remember.checked) {
+        localStorage.setItem('kiro_remember', '1');
+        localStorage.setItem('kiro_remembered_username', username);
+      } else {
+        localStorage.removeItem('kiro_remember');
+        localStorage.removeItem('kiro_remembered_username');
+      }
+      clearStaleLegacy();
+      showMain();
+      loadData();
     } catch (e) {
-      toast(t('login.connectError'), 'error');
+      if (errEl) errEl.textContent = t('login.connectError');
     }
   }
   function initRememberMe() {
     const remember = $('rememberPwd');
-    const field = $('pwdField');
-    if (!remember || !field) return;
-    if (localStorage.getItem('kiro_remember') === '1') {
+    const userField = $('usernameField');
+    if (!userField) return;
+    // Default username is "admin" so first-time setup is one click.
+    userField.value = localStorage.getItem('kiro_remembered_username') || 'admin';
+    if (remember && localStorage.getItem('kiro_remember') === '1') {
       remember.checked = true;
-      const saved = localStorage.getItem('kiro_remembered_pwd');
-      if (saved) field.value = saved;
     }
   }
-  function logout() {
-    clearActivePassword();
+  async function logout() {
+    try { await userApi('/api/logout', { method: 'POST' }); } catch (e) { /* noop */ }
+    clearStaleLegacy();
+    currentAdminUser = null;
     location.reload();
   }
   function showMain() {
     $('loginPage').classList.add('hidden');
-    $('mainPage').classList.remove('hidden');
+    const main = $('mainPage');
+    main.classList.remove('hidden');
+    main.classList.add('has-sidebar');
+    document.body.classList.add('is-admin');
+    if (currentAdminUser) {
+      const nameEl = $('currentUserName');
+      if (nameEl) nameEl.textContent = currentAdminUser.username || '-';
+      const roleEl = $('currentUserRole');
+      if (roleEl) {
+        roleEl.textContent = (currentAdminUser.role || 'user').toUpperCase();
+        roleEl.classList.toggle('user', currentAdminUser.role !== 'admin');
+      }
+    }
   }
 
   // Data loaders
@@ -756,6 +786,13 @@
     if (normalized === 'google') return t('local.providerGoogle');
     return method;
   }
+
+  function renderProviderBadge(upstream) {
+    const id = (upstream || 'kiro').toLowerCase();
+    const map = { kiro: 'Kiro', codex: 'Codex', 'claude-code': 'Claude', gemini: 'Gemini', grok: 'Grok' };
+    const label = map[id] || id;
+    return '<span class="badge badge-provider provider-' + escapeAttr(id) + '">' + escapeHtml(label) + '</span>';
+  }
   function getStatusBadge(a) {
     const out = [];
     const isBanned = a.banStatus && a.banStatus !== 'ACTIVE';
@@ -835,6 +872,7 @@
         weightBadge +
         overageBadge +
         '<span class="badge badge-info">' + escapeHtml(formatAuthMethod(a.provider || a.authMethod)) + '</span>' +
+        renderProviderBadge(a.upstream) +
         getStatusBadge(a) +
         '</div>' +
         '</div>' +
@@ -1378,7 +1416,6 @@
   async function loadSettings() {
     const res = await api('/settings');
     const d = await res.json();
-    $('requireApiKey').checked = d.requireApiKey;
     $('allowOverUsage').checked = d.allowOverUsage || false;
     await Promise.all([loadThinkingConfig(), loadEndpointConfig(), loadProxyConfig(), loadPromptFilter(), loadApiKeys()]);
     refreshCustomSelects();
@@ -1462,26 +1499,6 @@
     const d = await res.json();
     if (d.success) toast(t('settings.proxySaved'), 'success');
     else toast(t('common.saveFailed') + ': ' + (d.error || ''), 'error');
-  }
-  async function saveRequireApiKey() {
-    try {
-      const requireApiKey = $('requireApiKey').checked;
-      if (requireApiKey) {
-        const hasEnabledKey = Array.isArray(apiKeysCache) && apiKeysCache.some(k => k && k.enabled);
-        if (!hasEnabledKey) {
-          if (!confirm(t('apiKeys.requireWithoutEnabledKeyWarning'))) {
-            $('requireApiKey').checked = false;
-            return;
-          }
-        }
-      }
-      const res = await api('/settings', { method: 'POST', body: JSON.stringify({ requireApiKey }) });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok || d.success === false) throw new Error(d.error || t('common.saveFailed'));
-      toast(t('detail.saved'), 'success');
-    } catch (e) {
-      toast((e && e.message) || t('common.saveFailed'), 'error');
-    }
   }
   async function saveOverUsageConfig() {
     const allowOverUsage = $('allowOverUsage').checked;
@@ -1867,7 +1884,11 @@
     sso: 'fa-solid fa-shield-halved',
     local: 'fa-solid fa-folder-open',
     credentials: 'fa-solid fa-code',
-    cookie: 'fa-solid fa-cookie-bite'
+    cookie: 'fa-solid fa-cookie-bite',
+    'codex-token': 'fa-solid fa-key',
+    'codex-oauth': 'fa-solid fa-globe',
+    'codex-device': 'fa-solid fa-mobile-screen',
+    'codex-callback': 'fa-solid fa-paste'
   };
   function methodCard(type, title, desc) {
     var icon = METHOD_ICONS[type] || 'fa-solid fa-circle-plus';
@@ -1891,6 +1912,10 @@
     else if (type === 'local') modalLocal(title, body);
     else if (type === 'credentials') modalCredentials(title, body);
     else if (type === 'cookie') modalCookie(title, body);
+    else if (type === 'codex-token') modalCodexToken(title, body);
+    else if (type === 'codex-oauth') modalCodexOAuth(title, body);
+    else if (type === 'codex-device') modalCodexDevice(title, body);
+    else if (type === 'codex-callback') modalCodexCallback(title, body);
     if (!modal.classList.contains('active')) openDialog('addModal');
     enhanceCustomSelects(body);
   }
@@ -1898,11 +1923,34 @@
     closeDialog('addModal');
     iamSession = '';
     if (builderIdPollTimer) { clearTimeout(builderIdPollTimer); builderIdPollTimer = null; }
+    if (codexDeviceTimer) { clearTimeout(codexDeviceTimer); codexDeviceTimer = null; }
     builderIdSession = '';
+  }
+  // Cached provider registry from /admin/api/providers; loaded on first modal open.
+  let providersCache = null;
+  async function loadProviders() {
+    if (providersCache) return providersCache;
+    try {
+      const res = await api('/providers');
+      const d = await res.json();
+      providersCache = (d && d.providers) || [];
+    } catch (e) {
+      providersCache = [];
+    }
+    return providersCache;
+  }
+  function providerStatusLabel(status) {
+    if (status === 'ready') return t('providers.ready');
+    if (status === 'stub') return t('providers.stub');
+    return t('providers.planned');
   }
   function modalAdd(title, body) {
     title.textContent = t('modal.addAccount');
     body.innerHTML =
+      '<div class="provider-picker" id="providerPicker">' +
+      '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>' +
+      '</div>' +
+      '<div id="providerMethods" class="hidden">' +
       '<div class="method-list">' +
       methodCard('builderid', t('modal.builderIdTitle'), t('modal.builderIdDesc')) +
       methodCard('iam', t('modal.iamTitle'), t('modal.iamDesc')) +
@@ -1911,7 +1959,73 @@
       methodCard('credentials', t('modal.credentialsTitle'), t('modal.credentialsDesc')) +
       methodCard('cookie', t('modal.cookieTitle'), t('modal.cookieDesc')) +
       '</div>' +
+      '</div>' +
+      '<div id="providerStub" class="hidden"></div>' +
       '<div class="modal-footer"><button class="btn btn-secondary" data-close-add="1" type="button">' + escapeHtml(t('common.cancel')) + '</button></div>';
+    renderProviderPicker();
+  }
+  async function renderProviderPicker() {
+    const list = await loadProviders();
+    const picker = $('providerPicker');
+    if (!picker) return;
+    picker.innerHTML = list.map(p =>
+      '<button type="button" class="provider-chip provider-' + escapeAttr(p.status) + '"' +
+      ' data-provider="' + escapeAttr(p.id) + '"' +
+      ' data-status="' + escapeAttr(p.status) + '">' +
+      '<span class="chip-label">' + escapeHtml(p.label) + '</span>' +
+      '<span class="chip-status">' + escapeHtml(providerStatusLabel(p.status)) + '</span>' +
+      '</button>'
+    ).join('');
+    selectProvider('kiro');
+    picker.querySelectorAll('.provider-chip').forEach(btn => {
+      btn.addEventListener('click', () => selectProvider(btn.dataset.provider));
+    });
+  }
+  function selectProvider(id) {
+    const list = providersCache || [];
+    const picker = $('providerPicker');
+    if (picker) {
+      picker.querySelectorAll('.provider-chip').forEach(c => c.classList.toggle('active', c.dataset.provider === id));
+    }
+    const provider = list.find(p => p.id === id) || { id, status: 'planned', label: id };
+    const methods = $('providerMethods');
+    const stub = $('providerStub');
+    if (id === 'kiro' && provider.status === 'ready') {
+      if (methods) methods.classList.remove('hidden');
+      if (stub) { stub.classList.add('hidden'); stub.innerHTML = ''; }
+      return;
+    }
+    if (id === 'codex' && provider.status === 'ready') {
+      if (methods) methods.classList.add('hidden');
+      if (!stub) return;
+      stub.classList.remove('hidden');
+      stub.innerHTML =
+        '<div class="method-list">' +
+        methodCard('codex-token', t('codex.tokenTitle'), t('codex.tokenDesc')) +
+        methodCard('codex-oauth', t('codex.oauthTitle'), t('codex.oauthDesc')) +
+        methodCard('codex-device', t('codex.deviceTitle'), t('codex.deviceDesc')) +
+        methodCard('codex-callback', t('codex.callbackTitle'), t('codex.callbackDesc')) +
+        '</div>' +
+        '<div class="modal-footer"><button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button></div>';
+      stub.querySelectorAll('.method-card').forEach(function(btn) {
+        btn.addEventListener('click', function() { showModal(btn.dataset.method); });
+      });
+      return;
+    }
+    if (methods) methods.classList.add('hidden');
+    if (!stub) return;
+    stub.classList.remove('hidden');
+    if (provider.status === 'stub') {
+      stub.innerHTML =
+        '<div class="message message-info"><b>' + escapeHtml(provider.label) + '</b><p class="text-sm mt-1">' +
+        escapeHtml(t('providers.stubHint')) + '</p>' +
+        (provider.authHint ? '<p class="text-xs mt-2 muted-line">' + escapeHtml(provider.authHint) + '</p>' : '') +
+        '</div>';
+    } else {
+      stub.innerHTML =
+        '<div class="message message-info"><b>' + escapeHtml(provider.label) + '</b><p class="text-sm mt-1">' +
+        escapeHtml(t('providers.plannedHint')) + '</p></div>';
+    }
   }
   function modalBuilderId(title, body) {
     title.textContent = t('modal.builderIdTitle');
@@ -2065,6 +2179,222 @@
       '<button class="btn btn-primary" id="importCookieBtn" type="button">' + escapeHtml(t('common.add')) + '</button>' +
       '</div>';
     $('importCookieBtn').addEventListener('click', importFromCookie);
+  }
+
+  // ==================== Codex Auth Modals ====================
+
+  function modalCodexToken(title, body) {
+    title.textContent = t('codex.tokenTitle');
+    body.innerHTML =
+      '<p class="help-block">' + escapeHtml(t('codex.refreshTokenHint')) + '</p>' +
+      '<div class="form-group"><label>' + escapeHtml(t('codex.refreshTokenLabel')) + '</label>' +
+      '<textarea id="codexRefreshToken" rows="3" placeholder="' + escapeAttr(t('codex.refreshTokenPlaceholder')) + '"></textarea></div>' +
+      '<div class="modal-footer">' +
+      '<button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button>' +
+      '<button class="btn btn-primary" id="importCodexTokenBtn" type="button">' + escapeHtml(t('common.import')) + '</button>' +
+      '</div>';
+    $('importCodexTokenBtn').addEventListener('click', function() {
+      var token = $('codexRefreshToken');
+      if (!token || !token.value.trim()) { alert(t('codex.refreshTokenRequired')); return; }
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex-import', { method: 'POST', body: JSON.stringify({ refreshToken: token.value.trim() }) })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            toast(t('codex.importSuccess') + ' ' + (res.account.email || res.account.id));
+            closeModal(); loadAccounts();
+          } else { alert(res.error || 'Import failed'); }
+        })
+        .catch(function(e) { alert(e.message || 'Import failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('common.import'); });
+    });
+  }
+
+  var codexOAuthState = '';
+  function modalCodexOAuth(title, body) {
+    title.textContent = t('codex.oauthTitle');
+    body.innerHTML =
+      '<p class="help-block">' + escapeHtml(t('codex.oauthDesc')) + '</p>' +
+      '<div id="codexOAuthStep1">' +
+      '<button class="btn btn-primary btn-block" id="codexOAuthStartBtn" type="button">' + escapeHtml(t('codex.oauthStartBtn')) + '</button>' +
+      '</div>' +
+      '<div id="codexOAuthStep2" class="hidden">' +
+      '<div class="message message-info message-center"><p class="builder-code" id="codexOAuthUrl"></p></div>' +
+      '<div class="flex gap-2 mt-2">' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexOAuthOpenBtn" type="button">' + escapeHtml(t('builderid.open')) + '</button>' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexOAuthCopyBtn" type="button">' + escapeHtml(t('common.copy')) + '</button>' +
+      '</div>' +
+      '<div class="form-group mt-3"><label>' + escapeHtml(t('codex.oauthCallbackLabel')) + '</label>' +
+      '<textarea id="codexCallbackUrl" rows="2" placeholder="' + escapeAttr(t('codex.oauthCallbackPlaceholder')) + '"></textarea></div>' +
+      '<p class="text-xs muted-line mb-2">' + escapeHtml(t('codex.oauthCallbackHint')) + '</p>' +
+      '<div class="modal-footer">' +
+      '<button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button>' +
+      '<button class="btn btn-primary" id="codexOAuthCallbackBtn" type="button">' + escapeHtml(t('common.import')) + '</button>' +
+      '</div>' +
+      '</div>';
+    $('codexOAuthStartBtn').addEventListener('click', function() {
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex/oauth/start', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) { alert(res.error || 'Failed'); return; }
+          codexOAuthState = res.state;
+          $('codexOAuthStep1').classList.add('hidden');
+          $('codexOAuthStep2').classList.remove('hidden');
+          $('codexOAuthUrl').textContent = res.url;
+          $('codexOAuthOpenBtn').onclick = function() { window.open(res.url, '_blank'); };
+          $('codexOAuthCopyBtn').onclick = function() {
+            navigator.clipboard.writeText(res.url);
+            toast(t('common.copied'));
+          };
+        })
+        .catch(function(e) { alert(e.message || 'Failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('codex.oauthStartBtn'); });
+    });
+    $('codexOAuthCallbackBtn').addEventListener('click', function() {
+      var url = $('codexCallbackUrl').value.trim();
+      if (!url) { alert(t('codex.refreshTokenRequired')); return; }
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex/oauth/callback', { method: 'POST', body: JSON.stringify({ callbackUrl: url }) })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            toast(t('codex.importSuccess') + ' ' + (res.account.email || res.account.id));
+            closeModal(); loadAccounts();
+          } else { alert(res.error || 'Failed'); }
+        })
+        .catch(function(e) { alert(e.message || 'Failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('common.import'); });
+    });
+  }
+
+  var codexDeviceTimer = null;
+  function modalCodexDevice(title, body) {
+    title.textContent = t('codex.deviceTitle');
+    body.innerHTML =
+      '<p class="help-block">' + escapeHtml(t('codex.deviceDesc')) + '</p>' +
+      '<div id="codexDeviceStep1">' +
+      '<button class="btn btn-primary btn-block" id="codexDeviceStartBtn" type="button">' + escapeHtml(t('builderid.startLogin')) + '</button>' +
+      '</div>' +
+      '<div id="codexDeviceStep2" class="hidden">' +
+      '<div class="message message-info message-center"><p class="builder-code" id="codexDeviceCode"></p><p class="text-xs mt-2">' + escapeHtml(t('builderid.verifyCode')) + '</p></div>' +
+      '<div class="form-group mt-2"><label>' + escapeHtml(t('codex.deviceVerifyUrl')) + '</label>' +
+      '<div class="endpoint"><span id="codexDeviceUrl" class="font-mono text-xs"></span></div>' +
+      '<div class="flex gap-2 mt-2">' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexDeviceOpenBtn" type="button">' + escapeHtml(t('builderid.open')) + '</button>' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexDeviceCopyBtn" type="button">' + escapeHtml(t('common.copy')) + '</button>' +
+      '</div></div>' +
+      '<p id="codexDeviceStatus" class="text-center text-sm mt-3 muted-text">' + escapeHtml(t('codex.deviceWaiting')) + '</p>' +
+      '<div class="modal-footer mt-3">' +
+      '<button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button>' +
+      '</div></div>';
+    $('codexDeviceStartBtn').addEventListener('click', function() {
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex/device/start', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) { alert(res.error || 'Failed'); return; }
+          $('codexDeviceStep1').classList.add('hidden');
+          $('codexDeviceStep2').classList.remove('hidden');
+          $('codexDeviceCode').textContent = res.userCode;
+          $('codexDeviceUrl').textContent = res.verificationUrl;
+          $('codexDeviceOpenBtn').onclick = function() { window.open(res.verificationUrl, '_blank'); };
+          $('codexDeviceCopyBtn').onclick = function() {
+            navigator.clipboard.writeText(res.userCode);
+            toast(t('common.copied'));
+          };
+          pollCodexDevice(res.deviceAuthId, res.userCode, res.interval || 5);
+        })
+        .catch(function(e) { alert(e.message || 'Failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('builderid.startLogin'); });
+    });
+  }
+  function pollCodexDevice(deviceAuthId, userCode, interval) {
+    if (codexDeviceTimer) clearTimeout(codexDeviceTimer);
+    codexDeviceTimer = setTimeout(function() {
+      api('/auth/codex/device/poll', { method: 'POST', body: JSON.stringify({ deviceAuthId: deviceAuthId, userCode: userCode }) })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.error) {
+            $('codexDeviceStatus').textContent = res.error;
+            return;
+          }
+          if (res.completed) {
+            $('codexDeviceStatus').textContent = t('codex.deviceSuccess');
+            toast(t('codex.importSuccess') + ' ' + (res.account.email || res.account.id));
+            closeModal(); loadAccounts();
+          } else {
+            $('codexDeviceStatus').textContent = t('codex.deviceWaiting');
+            pollCodexDevice(deviceAuthId, userCode, interval);
+          }
+        })
+        .catch(function() { pollCodexDevice(deviceAuthId, userCode, interval); });
+    }, interval * 1000);
+  }
+
+  function modalCodexCallback(title, body) {
+    title.textContent = t('codex.callbackTitle');
+    body.innerHTML =
+      '<div class="help-block"><ol class="steps-list">' +
+      '<li>' + escapeHtml(t('codex.callbackStep1')) + '</li>' +
+      '<li>' + escapeHtml(t('codex.callbackStep2')) + '</li>' +
+      '<li>' + escapeHtml(t('codex.callbackStep3')) + '</li>' +
+      '</ol></div>' +
+      '<div id="codexCallbackStep1">' +
+      '<button class="btn btn-primary btn-block" id="codexCallbackStartBtn" type="button">' + escapeHtml(t('codex.oauthStartBtn')) + '</button>' +
+      '</div>' +
+      '<div id="codexCallbackStep2" class="hidden">' +
+      '<div class="message message-info message-center"><p class="builder-code" id="codexCallbackUrl"></p></div>' +
+      '<div class="flex gap-2 mt-2">' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexCallbackOpenBtn" type="button">' + escapeHtml(t('builderid.open')) + '</button>' +
+      '<button class="btn btn-sm btn-outline flex-1" id="codexCallbackCopyBtn" type="button">' + escapeHtml(t('common.copy')) + '</button>' +
+      '</div>' +
+      '<div class="form-group mt-3"><label>' + escapeHtml(t('codex.oauthCallbackLabel')) + '</label>' +
+      '<textarea id="codexCallbackUrlInput" rows="2" placeholder="' + escapeAttr(t('codex.oauthCallbackPlaceholder')) + '"></textarea></div>' +
+      '<div class="modal-footer">' +
+      '<button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button>' +
+      '<button class="btn btn-primary" id="codexCallbackSubmitBtn" type="button">' + escapeHtml(t('common.import')) + '</button>' +
+      '</div></div>';
+    $('codexCallbackStartBtn').addEventListener('click', function() {
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex/oauth/start', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (!res.success) { alert(res.error || 'Failed'); return; }
+          codexOAuthState = res.state;
+          $('codexCallbackStep1').classList.add('hidden');
+          $('codexCallbackStep2').classList.remove('hidden');
+          $('codexCallbackUrl').textContent = res.url;
+          $('codexCallbackOpenBtn').onclick = function() { window.open(res.url, '_blank'); };
+          $('codexCallbackCopyBtn').onclick = function() {
+            navigator.clipboard.writeText(res.url);
+            toast(t('common.copied'));
+          };
+        })
+        .catch(function(e) { alert(e.message || 'Failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('codex.oauthStartBtn'); });
+    });
+    $('codexCallbackSubmitBtn').addEventListener('click', function() {
+      var url = $('codexCallbackUrlInput').value.trim();
+      if (!url) { alert(t('codex.refreshTokenRequired')); return; }
+      var btn = this;
+      btn.disabled = true; btn.textContent = t('common.loading');
+      api('/auth/codex/oauth/callback', { method: 'POST', body: JSON.stringify({ callbackUrl: url }) })
+        .then(function(r) { return r.json(); })
+        .then(function(res) {
+          if (res.success) {
+            toast(t('codex.importSuccess') + ' ' + (res.account.email || res.account.id));
+            closeModal(); loadAccounts();
+          } else { alert(res.error || 'Failed'); }
+        })
+        .catch(function(e) { alert(e.message || 'Failed'); })
+        .finally(function() { btn.disabled = false; btn.textContent = t('common.import'); });
+    });
   }
   function updateLocalFields() {
     const p = $('localProvider').value;
@@ -2518,17 +2848,374 @@
   }
   function closeUpdateModal() { closeDialog('updateModal'); }
 
+  // ---------- Users tab ----------
+  let usersData = [];
+  let editingUserId = null;
+
+  async function loadUsers() {
+    const box = $('usersList');
+    if (!box) return;
+    box.innerHTML = '<p class="muted-text" style="padding:1rem;">' + escapeHtml(t('common.loading')) + '</p>';
+    try {
+      const res = await api('/users');
+      const data = await res.json();
+      if (!res.ok) throw new Error((data && data.error && data.error.message) || 'HTTP ' + res.status);
+      usersData = (data && data.users) || [];
+      renderUsers();
+    } catch (e) {
+      box.innerHTML = '<p class="muted-text" style="padding:1rem;">' + escapeHtml(e.message || 'error') + '</p>';
+    }
+  }
+
+  function renderUsers() {
+    const box = $('usersList');
+    if (!box) return;
+    if (!usersData.length) {
+      box.innerHTML = '<p class="muted-text" style="padding:1rem;">' + escapeHtml(t('users.empty')) + '</p>';
+      return;
+    }
+    box.innerHTML = usersData.map(u => {
+      const role = u.role || 'user';
+      const roleClass = role === 'admin' ? '' : 'user';
+      const status = u.enabled
+        ? '<span class="pill">' + escapeHtml(t('users.statusEnabled')) + '</span>'
+        : '<span class="pill off">' + escapeHtml(t('users.statusDisabled')) + '</span>';
+      const created = u.createdAt ? formatTimestamp(u.createdAt) : '-';
+      return '' +
+        '<div class="user-row" data-id="' + escapeHtml(u.id) + '">' +
+          '<div class="user-row-main">' +
+            '<div class="user-row-name">' +
+              '<span class="role-badge ' + roleClass + '">' + escapeHtml(role.toUpperCase()) + '</span>' +
+              escapeHtml(u.username || '-') +
+              (u.email ? '<span class="muted-text" style="font-weight:400;font-size:0.78rem;">' + escapeHtml(u.email) + '</span>' : '') +
+            '</div>' +
+            '<div class="user-row-meta">' +
+              status +
+              '<span>' + escapeHtml(t('users.keysCount')) + ': ' + (u.keysCount || 0) + '</span>' +
+              '<span>' + escapeHtml(t('users.created')) + ': ' + escapeHtml(created) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="user-row-actions">' +
+            '<button type="button" class="btn btn-outline btn-xs" data-act="role">' + escapeHtml(role === 'admin' ? t('users.demote') : t('users.promote')) + '</button>' +
+            '<button type="button" class="btn btn-outline btn-xs" data-act="toggle">' + escapeHtml(u.enabled ? t('users.disable') : t('users.enable')) + '</button>' +
+            '<button type="button" class="btn btn-outline btn-xs" data-act="password">' + escapeHtml(t('users.resetPassword')) + '</button>' +
+            '<button type="button" class="btn btn-danger btn-xs" data-act="delete">' + escapeHtml(t('common.delete')) + '</button>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+    qsa('#usersList .user-row').forEach(row => {
+      const id = row.getAttribute('data-id');
+      qsa('[data-act]', row).forEach(btn => {
+        btn.addEventListener('click', () => onUserAction(id, btn.dataset.act));
+      });
+    });
+  }
+
+  async function onUserAction(id, action) {
+    const u = usersData.find(x => x.id === id);
+    if (!u) return;
+    if (action === 'toggle') {
+      try {
+        const res = await api('/users/' + encodeURIComponent(id) + '/enabled', {
+          method: 'POST', body: JSON.stringify({ enabled: !u.enabled }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+        await loadUsers();
+      } catch (e) { toast(e.message || 'error', 'error'); }
+    } else if (action === 'role') {
+      const next = u.role === 'admin' ? 'user' : 'admin';
+      try {
+        const res = await api('/users/' + encodeURIComponent(id) + '/role', {
+          method: 'POST', body: JSON.stringify({ role: next }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+        await loadUsers();
+      } catch (e) { toast(e.message || 'error', 'error'); }
+    } else if (action === 'password') {
+      openUserPasswordModal(u);
+    } else if (action === 'delete') {
+      if (!confirm(t('users.confirmDelete') + '\n' + (u.username || ''))) return;
+      try {
+        const res = await api('/users/' + encodeURIComponent(id), { method: 'DELETE' });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+        await loadUsers();
+      } catch (e) { toast(e.message || 'error', 'error'); }
+    }
+  }
+
+  function openUserModal() {
+    editingUserId = null;
+    ['userForm_username', 'userForm_email', 'userForm_password'].forEach(id => {
+      const el = $(id); if (el) el.value = '';
+    });
+    const role = $('userForm_role'); if (role) role.value = 'user';
+    const err = $('userModalError'); if (err) err.textContent = '';
+    openDialog('userModal');
+  }
+  function closeUserModal() { closeDialog('userModal'); }
+  async function saveUserModal() {
+    const errEl = $('userModalError'); if (errEl) errEl.textContent = '';
+    const body = {
+      username: ($('userForm_username').value || '').trim(),
+      email: ($('userForm_email').value || '').trim(),
+      password: $('userForm_password').value,
+      role: $('userForm_role').value,
+    };
+    if (!body.username || !body.password) {
+      if (errEl) errEl.textContent = t('users.missingFields');
+      return;
+    }
+    try {
+      const res = await api('/users', { method: 'POST', body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+      closeUserModal();
+      await loadUsers();
+    } catch (e) {
+      if (errEl) errEl.textContent = e.message || 'error';
+    }
+  }
+
+  function openUserPasswordModal(u) {
+    editingUserId = u.id;
+    const hint = $('userPasswordHint');
+    if (hint) hint.textContent = t('users.resetPasswordHint').replace('{user}', u.username || '');
+    const v = $('userPassword_value'); if (v) v.value = '';
+    const err = $('userPasswordError'); if (err) err.textContent = '';
+    openDialog('userPasswordModal');
+  }
+  function closeUserPasswordModal() { closeDialog('userPasswordModal'); }
+  async function saveUserPasswordModal() {
+    const errEl = $('userPasswordError'); if (errEl) errEl.textContent = '';
+    const newPassword = $('userPassword_value').value;
+    if (!newPassword || newPassword.length < 6) {
+      if (errEl) errEl.textContent = t('users.passwordTooShort');
+      return;
+    }
+    try {
+      const res = await api('/users/' + encodeURIComponent(editingUserId) + '/password', {
+        method: 'POST', body: JSON.stringify({ newPassword: newPassword }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+      closeUserPasswordModal();
+      toast(t('common.saved'), 'success');
+    } catch (e) {
+      if (errEl) errEl.textContent = e.message || 'error';
+    }
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '-';
+    const pad = n => (n < 10 ? '0' + n : n);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+
+  // ---------- Logs tab ----------
+  async function loadLogs() {
+    const container = $('logsList');
+    if (!container) return;
+    const params = new URLSearchParams();
+    const apiKeyId = ($('logFilterApiKeyId') && $('logFilterApiKeyId').value || '').trim();
+    const accountId = ($('logFilterAccountId') && $('logFilterAccountId').value || '').trim();
+    const limit = ($('logFilterLimit') && $('logFilterLimit').value || '100').trim();
+    if (apiKeyId) params.set('apiKeyId', apiKeyId);
+    if (accountId) params.set('accountId', accountId);
+    if (limit) params.set('limit', limit);
+    container.innerHTML = '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>';
+    try {
+      const res = await api('/logs?' + params.toString());
+      const d = await res.json().catch(() => ({}));
+      const logs = (d && d.logs) || [];
+      if (!logs.length) { container.innerHTML = '<div class="muted-line">' + escapeHtml(t('logs.empty')) + '</div>'; return; }
+      container.innerHTML = logs.map(renderLogRow).join('');
+    } catch (e) {
+      container.innerHTML = '<div class="muted-line">' + escapeHtml((e && e.message) || 'error') + '</div>';
+    }
+  }
+  function renderLogRow(l) {
+    const when = formatLogTime(l.createdAt);
+    const cls = l.status >= 400 ? 'log-row err' : 'log-row ok';
+    return '<div class="' + cls + '">' +
+      '<span class="log-time">' + escapeHtml(when) + '</span>' +
+      '<span class="log-pill">' + escapeHtml(l.provider || 'kiro') + '</span>' +
+      '<span class="log-model">' + escapeHtml(l.model || '-') + '</span>' +
+      '<span class="log-path">' + escapeHtml(l.path || '-') + '</span>' +
+      '<span class="log-tokens">' + (l.inputTokens || 0) + ' / ' + (l.outputTokens || 0) + '</span>' +
+      '<span class="log-credits">' + (Number(l.credits) || 0).toFixed(4) + '</span>' +
+      '<span class="log-status">' + (l.status || 0) + '</span>' +
+      (l.error ? '<span class="log-err">' + escapeHtml(l.error) + '</span>' : '') +
+      '</div>';
+  }
+  function formatLogTime(ts) {
+    if (!ts) return '-';
+    const d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '-';
+    const pad = n => (n < 10 ? '0' + n : n);
+    return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+      pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  async function loadUsageSeries() {
+    const wrap = $('usageSeries');
+    if (!wrap) return;
+    const apiKeyId = ($('seriesApiKeyId') && $('seriesApiKeyId').value || '').trim();
+    const days = ($('seriesDays') && $('seriesDays').value || '7').trim();
+    const params = new URLSearchParams();
+    if (apiKeyId) params.set('apiKeyId', apiKeyId);
+    params.set('days', days);
+    wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>';
+    try {
+      const res = await api('/usage-series?' + params.toString());
+      const d = await res.json().catch(() => ({}));
+      const points = (d && d.points) || [];
+      if (!points.length) { wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('logs.noData')) + '</div>'; return; }
+      const fmtBucket = b => {
+        const dt = new Date((b || 0) * 1000);
+        if (isNaN(dt.getTime())) return '';
+        const pad = n => (n < 10 ? '0' + n : n);
+        return pad(dt.getMonth() + 1) + '/' + pad(dt.getDate());
+      };
+      const maxTokens = points.reduce((m, p) => Math.max(m, p.tokens || 0), 0) || 1;
+      wrap.innerHTML = '<div class="series-bars">' +
+        points.map(p => {
+          const label = fmtBucket(p.bucket);
+          const h = Math.max(2, Math.round(((p.tokens || 0) / maxTokens) * 100));
+          return '<div class="series-bar" title="' + escapeAttr(label + ' tokens=' + (p.tokens || 0) + ' req=' + (p.requests || 0)) + '">' +
+            '<span class="bar-fill" style="height:' + h + '%"></span>' +
+            '<span class="bar-label">' + escapeHtml(label) + '</span>' +
+            '</div>';
+        }).join('') +
+        '</div>';
+    } catch (e) {
+      wrap.innerHTML = '<div class="muted-line">' + escapeHtml((e && e.message) || 'error') + '</div>';
+    }
+  }
+
+  // ---------- Aliases tab ----------
+  async function loadAliases() {
+    const wrap = $('aliasesList');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>';
+    try {
+      const res = await api('/aliases');
+      const d = await res.json().catch(() => ({}));
+      const list = (d && d.aliases) || [];
+      if (!list.length) { wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('aliases.empty')) + '</div>'; return; }
+      wrap.innerHTML = list.map(a =>
+        '<div class="alias-row">' +
+        '<span class="alias-name">' + escapeHtml(a.alias) + '</span>' +
+        '<span class="alias-arrow">→</span>' +
+        '<span class="alias-target">' + escapeHtml(a.target) + '</span>' +
+        '<span class="alias-pill">' + escapeHtml(a.provider || 'kiro') + '</span>' +
+        '<button class="btn btn-outline btn-xs" data-alias-del="' + escapeAttr(a.alias) + '" type="button">' + escapeHtml(t('common.delete')) + '</button>' +
+        '</div>'
+      ).join('');
+    } catch (e) {
+      wrap.innerHTML = '<div class="muted-line">' + escapeHtml((e && e.message) || 'error') + '</div>';
+    }
+  }
+  async function saveAlias() {
+    const alias = ($('aliasInput').value || '').trim();
+    const target = ($('aliasTargetInput').value || '').trim();
+    const provider = $('aliasProviderInput').value || 'kiro';
+    if (!alias || !target) { toast(t('aliases.missingFields'), 'error'); return; }
+    try {
+      const res = await api('/aliases', { method: 'POST', body: JSON.stringify({ alias, target, provider }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((d && d.error && d.error.message) || 'HTTP ' + res.status);
+      $('aliasInput').value = '';
+      $('aliasTargetInput').value = '';
+      toast(t('common.saved'), 'success');
+      loadAliases();
+    } catch (e) { toast((e && e.message) || 'error', 'error'); }
+  }
+  async function deleteAlias(alias) {
+    if (!confirm(t('aliases.confirmDelete', alias))) return;
+    try {
+      const res = await api('/aliases/' + encodeURIComponent(alias), { method: 'DELETE' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      loadAliases();
+    } catch (e) { toast((e && e.message) || 'error', 'error'); }
+  }
+
+  // ---------- Health tab ----------
+  async function loadHealth() {
+    const wrap = $('healthList');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>';
+    try {
+      const res = await api('/health');
+      const d = await res.json().catch(() => ({}));
+      const list = (d && d.health) || [];
+      if (!list.length) { wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('health.empty')) + '</div>'; return; }
+      wrap.innerHTML = list.map(h => {
+        const cls = 'health-' + (h.status || 'ok');
+        const statusLabel = h.status ? t('health.status.' + h.status) : '-';
+        return '<div class="health-row ' + cls + '">' +
+          '<span class="health-dot" aria-hidden="true"></span>' +
+          '<span class="health-acct">' + escapeHtml(h.accountId || '-') + '</span>' +
+          '<span class="health-status">' + escapeHtml(statusLabel) + '</span>' +
+          '<span class="health-streak">' + escapeHtml(t('health.failStreak')) + ': ' + (h.failStreak || 0) + '</span>' +
+          '<span class="health-time">' + escapeHtml(t('health.lastCheck')) + ': ' + formatLogTime(h.lastCheckAt) + '</span>' +
+          (h.autoDisabled ? '<span class="health-pill danger">' + escapeHtml(t('health.autoDisabled')) + '</span>' : '') +
+          (h.lastError ? '<span class="health-err">' + escapeHtml(h.lastError) + '</span>' : '') +
+          '</div>';
+      }).join('');
+    } catch (e) {
+      wrap.innerHTML = '<div class="muted-line">' + escapeHtml((e && e.message) || 'error') + '</div>';
+    }
+  }
+  async function runHealthCheck() {
+    try {
+      const res = await api('/health/check', { method: 'POST' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      toast(t('health.started'), 'success');
+      setTimeout(loadHealth, 1500);
+    } catch (e) { toast((e && e.message) || 'error', 'error'); }
+  }
+
   // Tabs
+  const TAB_TITLE_KEYS = {
+    accounts: 'tabs.accounts',
+    users: 'tabs.users',
+    logs: 'tabs.logs',
+    aliases: 'tabs.aliases',
+    health: 'tabs.health',
+    settings: 'tabs.settings',
+    api: 'tabs.api',
+  };
   function switchTab(tab) {
     qsa('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
     qsa('.tab-content').forEach(c => c.classList.add('hidden'));
-    $('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.remove('hidden');
+    const target = $('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (target) target.classList.remove('hidden');
+    const title = $('currentTabTitle');
+    if (title) {
+      const key = TAB_TITLE_KEYS[tab];
+      if (key) {
+        title.setAttribute('data-i18n', key);
+        title.textContent = t(key);
+      }
+    }
+    const sidebar = $('appSidebar');
+    if (sidebar) sidebar.classList.remove('is-open');
+    if (tab === 'users') loadUsers();
+    else if (tab === 'logs') { loadLogs(); loadUsageSeries(); }
+    else if (tab === 'aliases') loadAliases();
+    else if (tab === 'health') loadHealth();
   }
 
   // Event wiring
   function bindLoginEvents() {
     $('loginBtn').addEventListener('click', login);
     $('pwdField').addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
+    const u = $('usernameField');
+    if (u) u.addEventListener('keypress', e => { if (e.key === 'Enter') login(); });
 
     const pwdToggle = $('pwdToggle');
     if (pwdToggle) {
@@ -2564,6 +3251,21 @@
     $('logoutBtn').addEventListener('click', logout);
 
     qsa('#tabBar .tab').forEach(tab => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+
+    const toggle = $('sidebarToggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        const sidebar = $('appSidebar');
+        if (sidebar) sidebar.classList.toggle('is-open');
+      });
+    }
+    document.addEventListener('click', e => {
+      const sidebar = $('appSidebar');
+      if (!sidebar || !sidebar.classList.contains('is-open')) return;
+      if (sidebar.contains(e.target)) return;
+      if (e.target.closest('#sidebarToggle')) return;
+      sidebar.classList.remove('is-open');
+    });
 
     qsa('[data-copy]').forEach(btn => btn.addEventListener('click', async () => {
       const id = btn.dataset.copy;
@@ -2621,7 +3323,6 @@
   }
 
   function bindSettingsEvents() {
-    $('saveRequireApiKeyBtn').addEventListener('click', saveRequireApiKey);
     $('saveOverUsageBtn').addEventListener('click', saveOverUsageConfig);
     $('saveThinkingBtn').addEventListener('click', saveThinkingConfig);
     $('saveEndpointBtn').addEventListener('click', saveEndpointConfig);
@@ -2721,6 +3422,53 @@
     bindModalEvents();
     bindDetailEvents();
     bindTestEvents();
+    bindUserMgmtEvents();
+  }
+
+  function bindUserMgmtEvents() {
+    const refresh = $('refreshUsersBtn');
+    if (refresh) refresh.addEventListener('click', loadUsers);
+    const add = $('addUserBtn');
+    if (add) add.addEventListener('click', openUserModal);
+    const close = $('userModalClose');
+    if (close) close.addEventListener('click', closeUserModal);
+    const cancel = $('userModalCancelBtn');
+    if (cancel) cancel.addEventListener('click', closeUserModal);
+    const save = $('userModalSaveBtn');
+    if (save) save.addEventListener('click', saveUserModal);
+    const pwClose = $('userPasswordClose');
+    if (pwClose) pwClose.addEventListener('click', closeUserPasswordModal);
+    const pwCancel = $('userPasswordCancelBtn');
+    if (pwCancel) pwCancel.addEventListener('click', closeUserPasswordModal);
+    const pwSave = $('userPasswordSaveBtn');
+    if (pwSave) pwSave.addEventListener('click', saveUserPasswordModal);
+
+    // Logs tab
+    const refreshLogs = $('refreshLogsBtn');
+    if (refreshLogs) refreshLogs.addEventListener('click', loadLogs);
+    const loadSeries = $('loadSeriesBtn');
+    if (loadSeries) loadSeries.addEventListener('click', loadUsageSeries);
+    ['logFilterApiKeyId', 'logFilterAccountId', 'logFilterLimit'].forEach(id => {
+      const el = $(id);
+      if (el) el.addEventListener('keypress', e => { if (e.key === 'Enter') loadLogs(); });
+    });
+
+    // Aliases tab
+    const refreshAliases = $('refreshAliasesBtn');
+    if (refreshAliases) refreshAliases.addEventListener('click', loadAliases);
+    const saveAliasBtn = $('saveAliasBtn');
+    if (saveAliasBtn) saveAliasBtn.addEventListener('click', saveAlias);
+    const aliasesList = $('aliasesList');
+    if (aliasesList) aliasesList.addEventListener('click', e => {
+      const btn = e.target.closest('[data-alias-del]');
+      if (btn) deleteAlias(btn.dataset.aliasDel);
+    });
+
+    // Health tab
+    const refreshHealth = $('refreshHealthBtn');
+    if (refreshHealth) refreshHealth.addEventListener('click', loadHealth);
+    const runHealth = $('runHealthCheckBtn');
+    if (runHealth) runHealth.addEventListener('click', runHealthCheck);
   }
 
   // Init
@@ -2735,7 +3483,7 @@
     const yr = $('footerYear');
     if (yr) yr.textContent = new Date().getFullYear();
     wireEvents();
-    if (password) tryAutoLogin();
+    tryAutoLogin();
     setInterval(() => {
       if (!$('mainPage').classList.contains('hidden')) loadStats();
     }, 10000);

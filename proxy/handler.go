@@ -8,6 +8,7 @@ import (
 	"kiro-go/config"
 	"kiro-go/logger"
 	"kiro-go/pool"
+	"kiro-go/providers"
 	"kiro-go/store"
 	"net/http"
 	"strings"
@@ -1249,6 +1250,7 @@ func (h *Handler) handleClaudeStream(w http.ResponseWriter, payload *KiroPayload
 		outputTokens = estimateClaudeOutputTokens(outputContent, thinkingOutput, toolUses)
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/messages", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 		h.promptCache.Update(account.ID, cacheProfile)
@@ -1372,6 +1374,43 @@ func (h *Handler) recordFailure() {
 	atomic.AddInt64(&h.failedRequests, 1)
 }
 
+// writeRequestLog persists one row to the request_logs table. Errors are
+// logged at debug level and otherwise swallowed — request handling must not
+// fail because logging fails.
+func (h *Handler) writeRequestLog(entry store.RequestLog) {
+	if entry.ApiKeyID != "" {
+		// Resolve owning user when we have a per-user key match.
+		if k, err := store.GetApiKeyByID(entry.ApiKeyID); err == nil {
+			entry.UserID = k.UserID
+		}
+	}
+	if err := store.LogRequest(entry); err != nil {
+		logger.Debugf("[RequestLog] persist failed: %v", err)
+	}
+}
+
+// logCallSuccess persists a successful upstream call. account may be nil if
+// the dispatch failed before an account was selected — the row still helps
+// the operator find pattern in errors.
+func (h *Handler) logCallSuccess(apiKeyID, path string, account *config.Account, model string, inputTokens, outputTokens int, credits float64) {
+	entry := store.RequestLog{
+		ApiKeyID:     apiKeyID,
+		Model:        model,
+		Path:         path,
+		Status:       200,
+		InputTokens:  int64(inputTokens),
+		OutputTokens: int64(outputTokens),
+		Credits:      credits,
+	}
+	if account != nil {
+		entry.AccountID = account.ID
+		entry.Provider = providers.Normalize(account.Upstream)
+	} else {
+		entry.Provider = "kiro"
+	}
+	h.writeRequestLog(entry)
+}
+
 // handleClaudeNonStream Claude 非流式响应
 func (h *Handler) handleClaudeNonStream(w http.ResponseWriter, payload *KiroPayload, model string, thinking bool, thinkingOpts claudeThinkingResponseOptions, estimatedInputTokens int, cacheProfile *promptCacheProfile, apiKeyID string) {
 	excluded := make(map[string]bool)
@@ -1446,6 +1485,7 @@ func (h *Handler) handleClaudeNonStream(w http.ResponseWriter, payload *KiroPayl
 		outputTokens = estimateClaudeOutputTokens(finalContent, rawThinkingContent, toolUses)
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/messages", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 		h.promptCache.Update(account.ID, cacheProfile)
@@ -1531,11 +1571,19 @@ func (h *Handler) handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	thinkingCfg := config.GetThinkingConfig()
 	actualModel, thinking := ParseModelAndThinking(req.Model, thinkingCfg.Suffix)
 	req.Model = actualModel
+
+	apiKeyID := activeApiKeyID(r.Context())
+
+	// Route GPT-family models to Codex upstream if available
+	if isCodexModel(req.Model) {
+		h.handleOpenAIChatViaCodex(w, &req, apiKeyID)
+		return
+	}
+
 	estimatedInputTokens := estimateOpenAIRequestInputTokens(&req)
 
 	kiroPayload := OpenAIToKiro(&req, thinking)
 
-	apiKeyID := activeApiKeyID(r.Context())
 	if req.Stream {
 		h.handleOpenAIStream(w, kiroPayload, req.Model, thinking, estimatedInputTokens, apiKeyID)
 	} else {
@@ -1892,6 +1940,7 @@ func (h *Handler) handleOpenAIStream(w http.ResponseWriter, payload *KiroPayload
 		}
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/chat/completions", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 
@@ -1995,6 +2044,7 @@ func (h *Handler) handleOpenAINonStream(w http.ResponseWriter, payload *KiroPayl
 		outputTokens = estimateOpenAIOutputTokens(finalContent, reasoningContent, toolUses)
 
 		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.logCallSuccess(apiKeyID, "/v1/chat/completions", account, model, inputTokens, outputTokens, credits)
 		h.pool.RecordSuccess(account.ID)
 		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
 
@@ -2071,16 +2121,8 @@ func (h *Handler) ensureValidToken(account *config.Account) error {
 // ==================== 管理 API ====================
 
 func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
-	// 验证密码
-	password := r.Header.Get("X-Admin-Password")
-	if password == "" {
-		cookie, _ := r.Cookie("admin_password")
-		if cookie != nil {
-			password = cookie.Value
-		}
-	}
-
-	if password != config.GetPassword() {
+	// 验证身份：优先认 session cookie + admin 角色，回退到老的 X-Admin-Password
+	if !h.adminAuthorized(r) {
 		w.WriteHeader(401)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
 		return
@@ -2141,6 +2183,16 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 		h.apiImportSsoToken(w, r)
 	case path == "/auth/credentials" && r.Method == "POST":
 		h.apiImportCredentials(w, r)
+	case path == "/auth/codex-import" && r.Method == "POST":
+		h.apiImportCodexAccount(w, r)
+	case path == "/auth/codex/oauth/start" && r.Method == "POST":
+		h.apiCodexOAuthStart(w, r)
+	case path == "/auth/codex/oauth/callback" && r.Method == "POST":
+		h.apiCodexOAuthCallback(w, r)
+	case path == "/auth/codex/device/start" && r.Method == "POST":
+		h.apiCodexDeviceStart(w, r)
+	case path == "/auth/codex/device/poll" && r.Method == "POST":
+		h.apiCodexDevicePoll(w, r)
 	case path == "/status" && r.Method == "GET":
 		h.apiGetStatus(w, r)
 	case path == "/settings" && r.Method == "GET":
@@ -2186,6 +2238,40 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 		h.apiUpdateApiKey(w, r, strings.TrimPrefix(path, "/api-keys/"))
 	case strings.HasPrefix(path, "/api-keys/") && r.Method == "DELETE":
 		h.apiDeleteApiKey(w, r, strings.TrimPrefix(path, "/api-keys/"))
+	case path == "/users" && r.Method == "GET":
+		h.apiAdminListUsers(w, r)
+	case path == "/users" && r.Method == "POST":
+		h.apiAdminCreateUser(w, r)
+	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/password") && r.Method == "POST":
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/password")
+		h.apiAdminResetUserPassword(w, r, id)
+	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/role") && r.Method == "POST":
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/role")
+		h.apiAdminSetUserRole(w, r, id)
+	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/enabled") && r.Method == "POST":
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/enabled")
+		h.apiAdminSetUserEnabled(w, r, id)
+	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/keys") && r.Method == "GET":
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/keys")
+		h.apiAdminListUserKeys(w, r, id)
+	case strings.HasPrefix(path, "/users/") && r.Method == "DELETE":
+		h.apiAdminDeleteUser(w, r, strings.TrimPrefix(path, "/users/"))
+	case path == "/logs" && r.Method == "GET":
+		h.apiAdminListLogs(w, r)
+	case path == "/usage-series" && r.Method == "GET":
+		h.apiAdminUsageSeries(w, r)
+	case path == "/aliases" && r.Method == "GET":
+		h.apiAdminListAliases(w, r)
+	case path == "/aliases" && r.Method == "POST":
+		h.apiAdminUpsertAlias(w, r)
+	case strings.HasPrefix(path, "/aliases/") && r.Method == "DELETE":
+		h.apiAdminDeleteAlias(w, r, strings.TrimPrefix(path, "/aliases/"))
+	case path == "/providers" && r.Method == "GET":
+		h.apiAdminListProviders(w, r)
+	case path == "/health" && r.Method == "GET":
+		h.apiAdminListHealth(w, r)
+	case path == "/health/check" && r.Method == "POST":
+		h.apiAdminRunHealthCheck(w, r)
 	default:
 		w.WriteHeader(404)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Not Found"})
@@ -2268,6 +2354,7 @@ func (h *Handler) apiAddAccount(w http.ResponseWriter, r *http.Request) {
 	if account.Region == "" {
 		account.Region = "us-east-1"
 	}
+	account.Upstream = providers.Normalize(account.Upstream)
 
 	if err := config.AddAccount(account); err != nil {
 		w.WriteHeader(500)
