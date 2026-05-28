@@ -110,7 +110,7 @@ func (h *Handler) handleOpenAIResponses(w http.ResponseWriter, r *http.Request) 
 	estimatedInputTokens := estimateOpenAIRequestInputTokens(openaiReq)
 	kiroPayload := OpenAIToKiro(openaiReq, thinking)
 
-	apiKeyID := apiKeyIDFromContext(r.Context())
+	apiKeyID := activeApiKeyID(r.Context())
 	respID := generateResponseID()
 
 	if req.Stream {

@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"kiro-go/config"
+	"kiro-go/store"
 	"net/http"
 	"strings"
 )
@@ -10,6 +11,9 @@ import (
 // apiKeyContextKey is an unexported type used as the context key for the matched ApiKeyEntry
 // so it cannot collide with keys defined in other packages.
 type apiKeyContextKey struct{}
+
+// userApiKeyContextKey carries the matched per-user store.UserApiKey ID.
+type userApiKeyContextKey struct{}
 
 // authError describes why authentication failed. status is the HTTP status code to send.
 type authError struct {
@@ -38,61 +42,93 @@ func extractProvidedKey(r *http.Request) string {
 
 // authenticate validates an incoming request against the configured API keys.
 //
-// Master switch: config.RequireApiKey. When false, requests pass without checking
-// any keys, even if entries exist (so the admin UI can hold draft keys without
-// affecting public deployments).
+// Master switch: config.RequireApiKey. When false AND no per-user keys have
+// been issued, requests pass without checking any keys. Once any user has
+// generated a key, auth is implicitly required (otherwise the generated keys
+// would be useless).
 //
-// When RequireApiKey is true:
-//  1. If ApiKeys is non-empty, the provided key MUST match an enabled, in-quota
-//     entry. Returns the matched entry (a copy) so callers can attribute usage.
-//  2. Else if the legacy single ApiKey field is set, the provided key MUST match it.
-//  3. Else (switch on but nothing configured) → fail-closed: every request is rejected.
-//     This prevents the prior bug where toggling auth on without keys silently
-//     left the service open.
+// When auth is required:
+//  1. The provided key is looked up in the SQLite per-user key store first.
+//     If found, enabled, and within quota, the request is authorized.
+//  2. Otherwise the legacy config.ApiKeys list is consulted (mostly empty
+//     after migration, kept as a safety net).
+//  3. Otherwise the legacy single config.ApiKey field is checked.
+//  4. Otherwise the request is rejected.
 //
-// Returns (entry, nil) on success. entry is nil when the legacy single-key path
-// is used or when the master switch is off.
-func (h *Handler) authenticate(r *http.Request) (*config.ApiKeyEntry, error) {
-	if !config.IsApiKeyRequired() {
-		return nil, nil
+// Returns (legacyEntry, contextualizedRequest, nil) on success. legacyEntry is
+// non-nil only when the key matched a legacy config entry; for user keys, the
+// returned request carries the matched key ID in its context.
+func (h *Handler) authenticate(r *http.Request) (*config.ApiKeyEntry, *http.Request, error) {
+	required := config.IsApiKeyRequired() || h.hasAnyUserApiKeys()
+	if !required {
+		return nil, r, nil
 	}
 
 	provided := extractProvidedKey(r)
+	if provided == "" {
+		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
+	}
 
-	if config.HasApiKeys() {
-		if provided == "" {
-			return nil, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
+	// Try the per-user store first.
+	if k, err := store.FindApiKeyByValue(provided); err == nil {
+		if !k.Enabled {
+			return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "API key disabled")
 		}
+		if overToken, overCredit := store.ApiKeyOverLimit(*k); overToken || overCredit {
+			if overToken {
+				return nil, r, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "token limit exceeded")
+			}
+			return nil, r, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "credit limit exceeded")
+		}
+		if owner, err := store.GetUserByID(k.UserID); err == nil && !owner.Enabled {
+			return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Account disabled")
+		}
+		ctx := context.WithValue(r.Context(), userApiKeyContextKey{}, k.ID)
+		return nil, r.WithContext(ctx), nil
+	}
+
+	// Legacy multi-key list.
+	if config.HasApiKeys() {
 		entry := config.FindApiKeyByValue(provided)
 		if entry == nil {
-			return nil, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
+			return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
 		}
 		if !entry.Enabled {
-			return nil, newAuthError(http.StatusUnauthorized, "authentication_error", "API key disabled")
+			return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "API key disabled")
 		}
 		if overToken, overCredit := config.ApiKeyOverLimit(*entry); overToken || overCredit {
 			if overToken {
-				return nil, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "token limit exceeded")
+				return nil, r, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "token limit exceeded")
 			}
-			return nil, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "credit limit exceeded")
+			return nil, r, newAuthError(http.StatusTooManyRequests, "rate_limit_error", "credit limit exceeded")
 		}
-		return entry, nil
+		return entry, r, nil
 	}
 
 	// Legacy single-key path.
 	expected := config.GetApiKey()
 	if expected == "" {
-		// Auth required but nothing configured → fail closed.
-		return nil, newAuthError(http.StatusUnauthorized, "authentication_error", "API key authentication is required but no keys are configured")
+		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "API key authentication is required but no keys are configured")
 	}
-	if provided == "" || provided != expected {
-		return nil, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
+	if provided != expected {
+		return nil, r, newAuthError(http.StatusUnauthorized, "authentication_error", "Invalid or missing API key")
 	}
-	return nil, nil
+	return nil, r, nil
 }
 
-// withApiKeyContext attaches the matched entry to the request context so downstream
-// handlers (recordSuccess, etc.) can credit usage against the correct key.
+// hasAnyUserApiKeys reports whether at least one user-issued API key exists.
+// Errors fall closed (returns true) so a transient DB failure doesn't accidentally
+// open the API.
+func (h *Handler) hasAnyUserApiKeys() bool {
+	keys, err := store.ListAllApiKeys()
+	if err != nil {
+		return true
+	}
+	return len(keys) > 0
+}
+
+// withApiKeyContext attaches the matched legacy entry to the request context so
+// downstream handlers (recordSuccess, etc.) can credit usage against the correct key.
 func withApiKeyContext(r *http.Request, entry *config.ApiKeyEntry) *http.Request {
 	if entry == nil {
 		return r
@@ -101,7 +137,7 @@ func withApiKeyContext(r *http.Request, entry *config.ApiKeyEntry) *http.Request
 	return r.WithContext(ctx)
 }
 
-// apiKeyIDFromContext returns the matched API key ID stored in ctx, or empty string.
+// apiKeyIDFromContext returns the matched legacy API key ID stored in ctx, or empty string.
 func apiKeyIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -110,4 +146,24 @@ func apiKeyIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// userApiKeyIDFromContext returns the matched per-user (SQLite) API key ID, if any.
+func userApiKeyIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if v, ok := ctx.Value(userApiKeyContextKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// activeApiKeyID returns whichever ID we should attribute usage to.
+// Per-user keys take precedence over the legacy config keys.
+func activeApiKeyID(ctx context.Context) string {
+	if id := userApiKeyIDFromContext(ctx); id != "" {
+		return id
+	}
+	return apiKeyIDFromContext(ctx)
 }

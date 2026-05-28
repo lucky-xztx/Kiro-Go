@@ -230,3 +230,30 @@ func ApiKeyOverLimit(e ApiKeyEntry) (overToken bool, overCredit bool) {
 	}
 	return
 }
+
+// GetLegacyApiKeysForMigration returns a snapshot of ApiKeys so the SQLite
+// store can migrate them out on first launch. Returns nil after migration runs.
+func GetLegacyApiKeysForMigration() []ApiKeyEntry {
+	cfgLock.RLock()
+	defer cfgLock.RUnlock()
+	if cfg == nil || len(cfg.ApiKeys) == 0 {
+		return nil
+	}
+	out := make([]ApiKeyEntry, len(cfg.ApiKeys))
+	copy(out, cfg.ApiKeys)
+	return out
+}
+
+// ClearLegacyApiKeys empties the in-config ApiKeys slice and persists. Called
+// once migration into the SQLite store has succeeded so the JSON file no
+// longer holds stale duplicates.
+func ClearLegacyApiKeys() error {
+	cfgLock.Lock()
+	defer cfgLock.Unlock()
+	if cfg == nil {
+		return nil
+	}
+	cfg.ApiKeys = nil
+	cfg.ApiKey = ""
+	return saveLocked()
+}

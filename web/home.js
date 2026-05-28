@@ -3,9 +3,18 @@
   "use strict";
 
   var BASE = window.location.origin;
+  var currentUser = null;
 
   function $(id) {
     return document.getElementById(id);
+  }
+
+  function escapeHTML(s) {
+    return String(s == null ? "" : s).replace(/[<>&"']/g, function (c) {
+      return (
+        { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c] || c
+      );
+    });
   }
 
   function showToast(text) {
@@ -76,6 +85,17 @@
     return Number(n).toLocaleString();
   }
 
+  function formatTime(ts) {
+    if (!ts) return "-";
+    var d = new Date(typeof ts === "number" ? ts * 1000 : ts);
+    if (isNaN(d.getTime())) return "-";
+    var pad = function (n) { return n < 10 ? "0" + n : n; };
+    return (
+      d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+      " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
+    );
+  }
+
   function bindCopy() {
     document.querySelectorAll("[data-copy]").forEach(function (el) {
       el.addEventListener("click", function () {
@@ -136,7 +156,6 @@
           listEl.innerHTML = '<span class="no-models">暂无可用模型</span>';
           return;
         }
-        // Dedup by id, prefer non-thinking variants first.
         var ids = [];
         var seen = {};
         models.forEach(function (m) {
@@ -147,12 +166,7 @@
         });
         listEl.innerHTML = ids
           .map(function (id) {
-            var safe = String(id).replace(/[<>&"']/g, function (c) {
-              return (
-                { "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;" }[c] ||
-                c
-              );
-            });
+            var safe = escapeHTML(id);
             return '<span class="model-tag" data-model="' + safe + '">' + safe + "</span>";
           })
           .join("");
@@ -170,11 +184,331 @@
       });
   }
 
+  /* ---------------------- Auth ---------------------- */
+
+  function api(path, opts) {
+    opts = opts || {};
+    opts.credentials = "same-origin";
+    opts.headers = opts.headers || {};
+    if (opts.body && !opts.headers["Content-Type"]) {
+      opts.headers["Content-Type"] = "application/json";
+    }
+    return fetch(path, opts).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) {
+          var msg = (data && data.error && data.error.message) || ("HTTP " + r.status);
+          var err = new Error(msg);
+          err.status = r.status;
+          err.data = data;
+          throw err;
+        }
+        return data;
+      }, function () {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return {};
+      });
+    });
+  }
+
+  function renderTopBar() {
+    var box = $("authActions");
+    if (!box) return;
+    if (currentUser) {
+      var roleLabel = currentUser.role === "admin" ? "ADMIN" : "USER";
+      var roleClass = currentUser.role === "admin" ? "" : "user";
+      box.innerHTML =
+        '<span class="user-chip">' +
+          '<span class="role-badge ' + roleClass + '">' + roleLabel + '</span>' +
+          escapeHTML(currentUser.username) +
+        '</span>' +
+        '<button type="button" class="btn-ghost" id="logoutBtn">退出</button>';
+      var btn = $("logoutBtn");
+      if (btn) btn.addEventListener("click", doLogout);
+    } else {
+      box.innerHTML =
+        '<button type="button" class="btn-ghost" id="loginBtn">登录</button>' +
+        '<button type="button" class="btn-pill" id="registerBtn">注册</button>';
+      $("loginBtn").addEventListener("click", function () { openAuth("login"); });
+      $("registerBtn").addEventListener("click", function () { openAuth("register"); });
+    }
+    var entry = $("adminEntry");
+    if (entry) {
+      if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
+      else entry.setAttribute("hidden", "");
+    }
+    var hint = $("apiKeyHint");
+    if (hint) {
+      if (currentUser) {
+        hint.textContent = "在下方「我的 API Key」中生成专属 Key";
+      } else {
+        hint.textContent = "登录后即可生成专属 API Key";
+      }
+    }
+    var card = $("myKeysCard");
+    if (card) {
+      if (currentUser) {
+        card.removeAttribute("hidden");
+        loadMyKeys();
+      } else {
+        card.setAttribute("hidden", "");
+      }
+    }
+  }
+
+  function loadMe() {
+    return api("/api/me").then(function (d) {
+      currentUser = (d && d.user) || null;
+      renderTopBar();
+    }).catch(function () {
+      currentUser = null;
+      renderTopBar();
+    });
+  }
+
+  function doLogout() {
+    api("/api/logout", { method: "POST" }).then(function () {
+      currentUser = null;
+      renderTopBar();
+      showToast("已退出登录");
+    }).catch(function () {
+      showToast("退出失败");
+    });
+  }
+
+  /* ---------------------- Auth modal ---------------------- */
+
+  function openAuth(mode) {
+    var overlay = $("authOverlay");
+    if (!overlay) return;
+    overlay.removeAttribute("hidden");
+    setAuthMode(mode || "login");
+    var form = $("authForm");
+    if (form) form.reset();
+    var err = $("authError");
+    if (err) err.textContent = "";
+    setTimeout(function () {
+      var input = form && form.querySelector('input[name="username"]');
+      if (input) input.focus();
+    }, 30);
+  }
+
+  function closeAuth() {
+    var overlay = $("authOverlay");
+    if (overlay) overlay.setAttribute("hidden", "");
+  }
+
+  function setAuthMode(mode) {
+    document.querySelectorAll(".auth-tab").forEach(function (tab) {
+      if (tab.getAttribute("data-mode") === mode) tab.classList.add("is-active");
+      else tab.classList.remove("is-active");
+    });
+    var form = $("authForm");
+    if (!form) return;
+    form.setAttribute("data-mode", mode);
+    form.querySelectorAll("[data-only]").forEach(function (el) {
+      if (el.getAttribute("data-only") === mode) {
+        el.removeAttribute("hidden");
+        var inp = el.querySelector("input");
+        if (inp) inp.disabled = false;
+      } else {
+        el.setAttribute("hidden", "");
+        var inp2 = el.querySelector("input");
+        if (inp2) inp2.disabled = true;
+      }
+    });
+    var submit = $("authSubmit");
+    if (submit) submit.textContent = mode === "register" ? "注册" : "登录";
+  }
+
+  function bindAuthModal() {
+    var overlay = $("authOverlay");
+    if (!overlay) return;
+    document.querySelectorAll(".auth-tab").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        setAuthMode(tab.getAttribute("data-mode"));
+        var err = $("authError");
+        if (err) err.textContent = "";
+      });
+    });
+    var closeBtn = $("authClose");
+    if (closeBtn) closeBtn.addEventListener("click", closeAuth);
+    overlay.addEventListener("click", function (e) {
+      if (e.target === overlay) closeAuth();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !overlay.hasAttribute("hidden")) closeAuth();
+    });
+    var form = $("authForm");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var mode = form.getAttribute("data-mode") || "login";
+      var fd = new FormData(form);
+      var username = (fd.get("username") || "").toString().trim();
+      var password = (fd.get("password") || "").toString();
+      var email = (fd.get("email") || "").toString().trim();
+      var err = $("authError");
+      if (err) err.textContent = "";
+      if (!username || !password) {
+        if (err) err.textContent = "请填写用户名和密码";
+        return;
+      }
+      var submit = $("authSubmit");
+      if (submit) submit.disabled = true;
+      var path = mode === "register" ? "/api/register" : "/api/login";
+      var body = mode === "register"
+        ? { username: username, password: password, email: email }
+        : { username: username, password: password };
+      api(path, { method: "POST", body: JSON.stringify(body) })
+        .then(function (d) {
+          currentUser = (d && d.user) || null;
+          renderTopBar();
+          closeAuth();
+          showToast(mode === "register" ? "注册成功" : "欢迎回来");
+        })
+        .catch(function (e) {
+          if (err) err.textContent = e.message || "操作失败";
+        })
+        .then(function () {
+          if (submit) submit.disabled = false;
+        });
+    });
+  }
+
+  /* ---------------------- Keys ---------------------- */
+
+  function loadMyKeys() {
+    var box = $("keysList");
+    if (!box) return;
+    box.innerHTML = '<p class="muted-line">加载中...</p>';
+    api("/api/me/keys").then(function (d) {
+      var keys = (d && d.keys) || [];
+      renderKeys(keys);
+    }).catch(function (e) {
+      box.innerHTML = '<p class="muted-line">加载失败：' + escapeHTML(e.message || "") + "</p>";
+    });
+  }
+
+  function renderKeys(keys) {
+    var box = $("keysList");
+    if (!box) return;
+    if (!keys.length) {
+      box.innerHTML = '<p class="muted-line">还没有 Key，点击右上角生成。</p>';
+      return;
+    }
+    box.innerHTML = keys.map(function (k) {
+      var status = k.enabled
+        ? '<span class="pill">启用</span>'
+        : '<span class="pill off">已禁用</span>';
+      var tokens = formatTokens(k.tokensUsed || 0);
+      var tlimit = k.tokenLimit ? "/" + formatTokens(k.tokenLimit) : "";
+      var credits = (k.creditsUsed || 0).toFixed(2);
+      var climit = k.creditLimit ? "/" + Number(k.creditLimit).toFixed(2) : "";
+      var last = k.lastUsedAt ? formatTime(k.lastUsedAt) : "未使用";
+      return (
+        '<div class="key-item" data-id="' + escapeHTML(k.id) + '">' +
+          '<div class="key-item-main">' +
+            '<div class="key-name">' + escapeHTML(k.name || "未命名") + "</div>" +
+            '<div class="key-secret">' + escapeHTML(k.masked || "") + "</div>" +
+            '<div class="key-meta">' +
+              status +
+              '<span>Tokens ' + tokens + tlimit + "</span>" +
+              '<span>Credits ' + credits + climit + "</span>" +
+              '<span>最近使用 ' + last + "</span>" +
+            "</div>" +
+          "</div>" +
+          '<div class="key-actions">' +
+            '<button type="button" class="btn-mini" data-action="toggle">' +
+              (k.enabled ? "禁用" : "启用") + "</button>" +
+            '<button type="button" class="btn-mini danger" data-action="delete">删除</button>' +
+          "</div>" +
+        "</div>"
+      );
+    }).join("");
+    box.querySelectorAll(".key-item").forEach(function (row) {
+      var id = row.getAttribute("data-id");
+      row.querySelectorAll("[data-action]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var action = btn.getAttribute("data-action");
+          if (action === "toggle") {
+            var nextEnabled = btn.textContent.trim() === "启用";
+            api("/api/me/keys/" + encodeURIComponent(id), {
+              method: "PUT",
+              body: JSON.stringify({ enabled: nextEnabled }),
+            }).then(loadMyKeys).catch(function (e) {
+              showToast("操作失败：" + (e.message || ""));
+            });
+          } else if (action === "delete") {
+            if (!confirm("确定要删除这个 Key 吗？删除后无法恢复。")) return;
+            api("/api/me/keys/" + encodeURIComponent(id), { method: "DELETE" })
+              .then(loadMyKeys)
+              .catch(function (e) {
+                showToast("删除失败：" + (e.message || ""));
+              });
+          }
+        });
+      });
+    });
+  }
+
+  function bindKeyControls() {
+    var newBtn = $("newKeyBtn");
+    if (newBtn) {
+      newBtn.addEventListener("click", function () {
+        var name = prompt("为新 Key 起个名字（可留空）：", "");
+        if (name === null) return;
+        newBtn.disabled = true;
+        api("/api/me/keys", {
+          method: "POST",
+          body: JSON.stringify({ name: (name || "").trim() }),
+        }).then(function (d) {
+          var k = d && d.key;
+          if (k && k.key) showNewKey(k.key);
+          loadMyKeys();
+        }).catch(function (e) {
+          showToast("创建失败：" + (e.message || ""));
+        }).then(function () {
+          newBtn.disabled = false;
+        });
+      });
+    }
+    var copy = $("copyNewKey");
+    if (copy) {
+      copy.addEventListener("click", function () {
+        var v = $("newKeyValue");
+        if (!v) return;
+        safeCopy(v.textContent || "").then(function () {
+          showToast("已复制完整 Key");
+        });
+      });
+    }
+    var dismiss = $("dismissNewKey");
+    if (dismiss) {
+      dismiss.addEventListener("click", function () {
+        var box = $("newKeyBox");
+        if (box) box.setAttribute("hidden", "");
+      });
+    }
+  }
+
+  function showNewKey(value) {
+    var box = $("newKeyBox");
+    var v = $("newKeyValue");
+    if (!box || !v) return;
+    v.textContent = value;
+    box.removeAttribute("hidden");
+  }
+
+  /* ---------------------- Init ---------------------- */
+
   function init() {
     setEndpoints();
     bindCopy();
     loadStatus();
     loadModels();
+    bindAuthModal();
+    bindKeyControls();
+    loadMe();
     setInterval(loadStatus, 30000);
   }
 

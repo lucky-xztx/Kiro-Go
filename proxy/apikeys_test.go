@@ -46,7 +46,7 @@ func TestAuthenticateRejectsMissingKey(t *testing.T) {
 
 	h := &Handler{}
 	r := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err == nil {
 		t.Fatalf("expected error for missing key, got entry=%v", entry)
 	}
@@ -70,7 +70,7 @@ func TestAuthenticateRejectsDisabledKey(t *testing.T) {
 
 	h := &Handler{}
 	r := newAuthTestRequest(t, "Authorization", "Bearer sk-off")
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err == nil {
 		t.Fatalf("expected disabled key to be rejected, got entry=%v", entry)
 	}
@@ -94,7 +94,7 @@ func TestAuthenticateAcceptsEnabledKey(t *testing.T) {
 	h := &Handler{}
 	// Bearer header form
 	r := newAuthTestRequest(t, "Authorization", "Bearer sk-ok")
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err != nil {
 		t.Fatalf("expected success, got err=%v", err)
 	}
@@ -104,7 +104,7 @@ func TestAuthenticateAcceptsEnabledKey(t *testing.T) {
 
 	// X-Api-Key header form
 	r2 := newAuthTestRequest(t, "X-Api-Key", "sk-ok")
-	entry2, err := h.authenticate(r2)
+	entry2, _, err := h.authenticate(r2)
 	if err != nil {
 		t.Fatalf("X-Api-Key path failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestAuthenticateRejectsOverTokenLimit(t *testing.T) {
 
 	h := &Handler{}
 	r := newAuthTestRequest(t, "Authorization", "Bearer sk-tlimit")
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err == nil {
 		t.Fatalf("expected token limit rejection, got entry=%v", entry)
 	}
@@ -159,7 +159,7 @@ func TestAuthenticateRejectsOverCreditLimit(t *testing.T) {
 
 	h := &Handler{}
 	r := newAuthTestRequest(t, "Authorization", "Bearer sk-climit")
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err == nil {
 		t.Fatalf("expected credit limit rejection, got entry=%v", entry)
 	}
@@ -187,12 +187,12 @@ func TestAuthenticateLegacyFallback(t *testing.T) {
 
 	h := &Handler{}
 	good := newAuthTestRequest(t, "Authorization", "Bearer legacy-key")
-	if _, err := h.authenticate(good); err != nil {
+	if _, _, err := h.authenticate(good); err != nil {
 		t.Fatalf("expected legacy key to succeed: %v", err)
 	}
 
 	bad := newAuthTestRequest(t, "Authorization", "Bearer wrong")
-	_, err := h.authenticate(bad)
+	_, _, err := h.authenticate(bad)
 	if err == nil {
 		t.Fatalf("expected wrong legacy key to be rejected")
 	}
@@ -207,7 +207,7 @@ func TestAuthenticateNoAuthRequired(t *testing.T) {
 	// No keys configured, RequireApiKey defaults to false.
 	h := &Handler{}
 	r := newAuthTestRequest(t, "", "")
-	entry, err := h.authenticate(r)
+	entry, _, err := h.authenticate(r)
 	if err != nil {
 		t.Fatalf("expected open access when no keys configured: %v", err)
 	}
@@ -320,10 +320,10 @@ func TestAuthenticateMasterSwitchOffPassesThrough(t *testing.T) {
 	// RequireApiKey defaults to false — do not flip it on.
 
 	h := &Handler{}
-	if entry, err := h.authenticate(newAuthTestRequest(t, "", "")); err != nil || entry != nil {
+	if entry, _, err := h.authenticate(newAuthTestRequest(t, "", "")); err != nil || entry != nil {
 		t.Fatalf("expected open access without entry, got entry=%v err=%v", entry, err)
 	}
-	if entry, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer sk-anything")); err != nil || entry != nil {
+	if entry, _, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer sk-anything")); err != nil || entry != nil {
 		t.Fatalf("expected provided key to be ignored when gate is off, got entry=%v err=%v", entry, err)
 	}
 }
@@ -337,12 +337,12 @@ func TestAuthenticateRequiredWithoutKeysFailsClosed(t *testing.T) {
 	requireAuth(t)
 
 	h := &Handler{}
-	_, err := h.authenticate(newAuthTestRequest(t, "", ""))
+	_, _, err := h.authenticate(newAuthTestRequest(t, "", ""))
 	ae, ok := err.(*authError)
 	if !ok || ae.status != http.StatusUnauthorized {
 		t.Fatalf("expected 401 authError when no keys configured, got %T %v", err, err)
 	}
-	if _, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer anything")); err == nil {
+	if _, _, err := h.authenticate(newAuthTestRequest(t, "Authorization", "Bearer anything")); err == nil {
 		t.Fatalf("expected provided-key path to also fail closed when nothing is configured")
 	}
 }

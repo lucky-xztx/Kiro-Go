@@ -20,6 +20,16 @@
 <body>
   <div class="copied-toast" id="toast">已复制到剪贴板</div>
 
+  <!-- 顶部用户栏 -->
+  <div class="top-bar">
+    <div class="top-bar-inner" id="topBar">
+      <div class="auth-actions" id="authActions">
+        <button type="button" class="btn-ghost" id="loginBtn">登录</button>
+        <button type="button" class="btn-pill" id="registerBtn">注册</button>
+      </div>
+    </div>
+  </div>
+
   <div class="page">
     <header class="hero">
       <div class="hero-brand">
@@ -27,7 +37,7 @@
         <h1 id="serverName">Kiro-Go</h1>
       </div>
       <p class="subtitle">Claude / OpenAI 双协议兼容的 Kiro API 中转服务</p>
-      <a class="hero-link" href="/admin" target="_self">
+      <a class="hero-link" href="/admin" target="_self" id="adminEntry" hidden>
         <span>进入管理面板</span>
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
@@ -52,13 +62,32 @@
       </div>
       <div class="info-row" style="margin-top:18px">
         <span class="info-label">密钥</span>
-        <div class="info-value muted" id="apiKeyHint">由管理员在后台分配</div>
+        <div class="info-value muted" id="apiKeyHint">登录后即可生成专属 API Key</div>
       </div>
       <div class="info-row" style="margin-top:18px;align-items:flex-start">
         <span class="info-label">模型</span>
         <div class="models-list" id="modelsList">
           <span class="no-models">加载中...</span>
         </div>
+      </div>
+    </section>
+
+    <!-- 我的 Key（登录后显示） -->
+    <section class="card" id="myKeysCard" hidden>
+      <div class="keys-header">
+        <h2>我的 API Key</h2>
+        <button type="button" class="btn-pill" id="newKeyBtn">+ 生成新 Key</button>
+      </div>
+      <div id="newKeyBox" class="new-key-box" hidden>
+        <p class="new-key-tip">这是 Key 的完整值，仅显示一次，请妥善保存：</p>
+        <div class="new-key-row">
+          <code id="newKeyValue"></code>
+          <button type="button" class="btn-mini" id="copyNewKey">复制</button>
+          <button type="button" class="btn-mini" id="dismissNewKey">收起</button>
+        </div>
+      </div>
+      <div class="keys-list" id="keysList">
+        <p class="muted-line">还没有 Key，点击右上角生成。</p>
       </div>
     </section>
 
@@ -99,6 +128,35 @@
       <span class="dot">·</span>
       <a href="https://github.com/Quorinex/Kiro-Go" target="_blank" rel="noopener">GitHub</a>
     </footer>
+  </div>
+
+  <!-- 登录 / 注册 弹窗 -->
+  <div class="auth-overlay" id="authOverlay" hidden>
+    <div class="auth-card" role="dialog" aria-modal="true">
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab is-active" data-mode="login">登录</button>
+        <button type="button" class="auth-tab" data-mode="register">注册</button>
+        <button type="button" class="auth-close" id="authClose" aria-label="关闭">×</button>
+      </div>
+      <form id="authForm" class="auth-form" autocomplete="off">
+        <label>
+          <span>用户名</span>
+          <input type="text" name="username" required minlength="3" maxlength="32"
+            placeholder="字母 / 数字，3-32 位" />
+        </label>
+        <label data-only="register" hidden>
+          <span>邮箱（可选）</span>
+          <input type="email" name="email" placeholder="you@example.com" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input type="password" name="password" required minlength="6"
+            placeholder="不少于 6 位" />
+        </label>
+        <p class="auth-error" id="authError"></p>
+        <button type="submit" class="btn-pill auth-submit" id="authSubmit">登录</button>
+      </form>
+    </div>
   </div>
 
   <script src="/admin/home.js?v=__V__"></script>

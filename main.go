@@ -19,6 +19,7 @@ import (
 	"kiro-go/logger"
 	"kiro-go/pool"
 	"kiro-go/proxy"
+	"kiro-go/store"
 	"log"
 	"net/http"
 	"os"
@@ -49,6 +50,47 @@ func main() {
 	// 环境变量覆盖密码
 	if envPassword := os.Getenv("ADMIN_PASSWORD"); envPassword != "" {
 		config.SetPassword(envPassword)
+	}
+
+	// 初始化用户/Key 数据库 (SQLite)
+	dataDir := filepath.Dir(configPath)
+	dbPath := filepath.Join(dataDir, "kiro.db")
+	if envDB := os.Getenv("DB_PATH"); envDB != "" {
+		dbPath = envDB
+	}
+	if err := store.Init(dbPath); err != nil {
+		log.Fatalf("Failed to init store: %v", err)
+	}
+	// 确保至少有一个 admin（首启用 config.Password 创建）
+	admin, err := store.EnsureAdmin(config.GetPassword())
+	if err != nil {
+		log.Fatalf("Failed to ensure admin user: %v", err)
+	}
+	logger.Infof("Admin user ready: %s", admin.Username)
+	// 一次性把旧的 config.ApiKeys 迁移到 admin 名下
+	if legacy := config.GetLegacyApiKeysForMigration(); len(legacy) > 0 {
+		converted := make([]store.LegacyApiKey, 0, len(legacy))
+		for _, e := range legacy {
+			converted = append(converted, store.LegacyApiKey{
+				ID:            e.ID,
+				Name:          e.Name,
+				Key:           e.Key,
+				Enabled:       e.Enabled,
+				CreatedAt:     e.CreatedAt,
+				LastUsedAt:    e.LastUsedAt,
+				TokenLimit:    e.TokenLimit,
+				CreditLimit:   e.CreditLimit,
+				TokensUsed:    e.TokensUsed,
+				CreditsUsed:   e.CreditsUsed,
+				RequestsCount: e.RequestsCount,
+			})
+		}
+		if n, err := store.MigrateLegacyApiKeys(admin.ID, converted); err != nil {
+			logger.Warnf("Migrate legacy api keys: %v", err)
+		} else if n > 0 {
+			logger.Infof("Migrated %d legacy api key(s) to admin", n)
+			_ = config.ClearLegacyApiKeys()
+		}
 	}
 
 	// 初始化账号池

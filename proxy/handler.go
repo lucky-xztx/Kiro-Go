@@ -8,6 +8,7 @@ import (
 	"kiro-go/config"
 	"kiro-go/logger"
 	"kiro-go/pool"
+	"kiro-go/store"
 	"net/http"
 	"strings"
 	"sync"
@@ -301,14 +302,14 @@ func (h *Handler) refreshAllAccounts() {
 
 // validateApiKey 验证 API Key（Bool 包装，旧签名仍被部分调用方使用）
 func (h *Handler) validateApiKey(r *http.Request) bool {
-	_, err := h.authenticate(r)
+	_, _, err := h.authenticate(r)
 	return err == nil
 }
 
 // authenticateForClaude runs authenticate and writes a Claude-style error on failure.
 // Returns the request with the matched API key injected into context, or nil if auth failed.
 func (h *Handler) authenticateForClaude(w http.ResponseWriter, r *http.Request) *http.Request {
-	entry, err := h.authenticate(r)
+	entry, ar, err := h.authenticate(r)
 	if err != nil {
 		ae, _ := err.(*authError)
 		if ae == nil {
@@ -317,12 +318,12 @@ func (h *Handler) authenticateForClaude(w http.ResponseWriter, r *http.Request) 
 		h.sendClaudeError(w, ae.status, ae.code, ae.message)
 		return nil
 	}
-	return withApiKeyContext(r, entry)
+	return withApiKeyContext(ar, entry)
 }
 
 // authenticateForOpenAI runs authenticate and writes an OpenAI-style error on failure.
 func (h *Handler) authenticateForOpenAI(w http.ResponseWriter, r *http.Request) *http.Request {
-	entry, err := h.authenticate(r)
+	entry, ar, err := h.authenticate(r)
 	if err != nil {
 		ae, _ := err.(*authError)
 		if ae == nil {
@@ -331,7 +332,7 @@ func (h *Handler) authenticateForOpenAI(w http.ResponseWriter, r *http.Request) 
 		h.sendOpenAIError(w, ae.status, ae.code, ae.message)
 		return nil
 	}
-	return withApiKeyContext(r, entry)
+	return withApiKeyContext(ar, entry)
 }
 
 // ServeHTTP 路由分发
@@ -397,6 +398,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 公开统计（首页用，无需鉴权，只暴露非敏感字段）
 	case path == "/api/public/stats":
 		h.handlePublicStats(w, r)
+
+	// 用户与个人 Key 接口（注册/登录/我的 Key）
+	case strings.HasPrefix(path, "/api/") && path != "/api/event_logging/batch" && path != "/api/public/stats":
+		if h.handleUserAPI(w, r) {
+			return
+		}
+		http.Error(w, "Not Found", 404)
 
 	// 健康检查
 	case path == "/health":
@@ -824,7 +832,7 @@ func (h *Handler) handleClaudeMessagesInternal(w http.ResponseWriter, r *http.Re
 	kiroPayload := ClaudeToKiro(&req, thinking)
 
 	// Stream or non-stream
-	apiKeyID := apiKeyIDFromContext(r.Context())
+	apiKeyID := activeApiKeyID(r.Context())
 	if req.Stream {
 		h.handleClaudeStream(w, kiroPayload, req.Model, thinking, thinkingResponseOpts, estimatedInputTokens, cacheProfile, apiKeyID)
 	} else {
@@ -1332,12 +1340,29 @@ func (h *Handler) recordSuccess(inputTokens, outputTokens int, credits float64) 
 // recordSuccessForApiKey is recordSuccess + per-API-key usage attribution.
 // When apiKeyID is empty (legacy single-key path or unauthenticated path), only the
 // global counters are updated. Persistence errors are logged but do not propagate.
+//
+// apiKeyID may be either:
+//   - a legacy config.ApiKeyEntry ID (config.RecordApiKeyUsage)
+//   - a per-user store.UserApiKey ID (store.RecordApiKeyUsage)
+//
+// If a userApiKeyID context value is also present on the request, this helper
+// is given that ID directly by callers; otherwise we fall through to the
+// legacy config path.
 func (h *Handler) recordSuccessForApiKey(apiKeyID string, inputTokens, outputTokens int, credits float64) {
 	h.recordSuccess(inputTokens, outputTokens, credits)
 	if apiKeyID == "" {
 		return
 	}
-	if err := config.RecordApiKeyUsage(apiKeyID, int64(inputTokens+outputTokens), credits); err != nil {
+	tokens := int64(inputTokens + outputTokens)
+	// Try the SQLite per-user store first; if the ID isn't found, fall back to
+	// the legacy config keys table.
+	if _, err := store.GetApiKeyByID(apiKeyID); err == nil {
+		if err := store.RecordApiKeyUsage(apiKeyID, tokens, credits); err != nil {
+			logger.Warnf("[ApiKey] failed to record usage for user key %s: %v", apiKeyID, err)
+		}
+		return
+	}
+	if err := config.RecordApiKeyUsage(apiKeyID, tokens, credits); err != nil {
 		logger.Warnf("[ApiKey] failed to record usage for key %s: %v", apiKeyID, err)
 	}
 }
@@ -1510,7 +1535,7 @@ func (h *Handler) handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 
 	kiroPayload := OpenAIToKiro(&req, thinking)
 
-	apiKeyID := apiKeyIDFromContext(r.Context())
+	apiKeyID := activeApiKeyID(r.Context())
 	if req.Stream {
 		h.handleOpenAIStream(w, kiroPayload, req.Model, thinking, estimatedInputTokens, apiKeyID)
 	} else {
