@@ -176,7 +176,7 @@
         </header>
 
         <div class="container">
-      <!-- Stats summary -->
+          <!-- Stats summary -->
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-card-title" data-i18n="stats.accounts"></div>
@@ -250,9 +250,9 @@
           </div>
 
           <div class="toolbar">
-            <label class="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
-              <input type="checkbox" id="selectAllCheckbox" />
-              <span class="text-xs" data-i18n="batch.selectAll"></span>
+            <label class="select-all-chip" title="" data-i18n-title="batch.selectAll">
+              <input type="checkbox" id="selectAllCheckbox" class="kg-checkbox" />
+              <span class="select-all-label" data-i18n="batch.selectAll"></span>
             </label>
             <div id="batchBar" class="batch-bar hidden">
               <span id="batchCount" class="batch-count"></span>
@@ -607,49 +607,48 @@
             </div>
           </div>
           <small data-i18n="health.hint"></small>
-          <div id="healthList" class="health-list"></div>
+          <div class="health-list" id="healthList"></div>
         </div>
       </div>
         </div>
-      </main>
-    </div>
 
-    <!-- Footer -->
-    <footer class="app-footer" aria-label="" data-i18n-aria-label="aria.footer">
-      <div class="app-footer-inner">
-        <div class="footer-panel">
-          <div class="footer-identity">
-            <img class="footer-icon" src="/admin/favicon.ico" alt="" />
-            <div class="footer-copy">
-              <div class="footer-title-row">
-                <span class="footer-title">Kiro-Go</span>
-                <span class="footer-version" id="versionBadge" aria-label=""
-                  data-i18n-aria-label="aria.currentVersion"></span>
-                <span class="footer-version-status" id="statusBadge" data-i18n-title="status.running" title="">
-                  <span class="status-dot"></span>
-                </span>
+        <!-- Footer -->
+        <footer class="app-footer" aria-label="" data-i18n-aria-label="aria.footer">
+          <div class="app-footer-inner">
+            <div class="footer-panel">
+              <div class="footer-identity">
+                <img class="footer-icon" src="/admin/favicon.ico" alt="" />
+                <div class="footer-copy">
+                  <div class="footer-title-row">
+                    <span class="footer-title">Kiro-Go</span>
+                    <span class="footer-version" id="versionBadge" aria-label=""
+                      data-i18n-aria-label="aria.currentVersion"></span>
+                    <span class="footer-version-status" id="statusBadge" data-i18n-title="status.running" title="">
+                      <span class="status-dot"></span>
+                    </span>
+                  </div>
+                </div>
               </div>
-
+              <div class="footer-actions">
+                <nav class="footer-links" aria-label="" data-i18n-aria-label="aria.resources">
+                  <button class="footer-link" id="checkUpdateBtn" type="button">
+                    <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+                    <span data-i18n="update.check" data-update-label></span>
+                  </button>
+                  <a class="footer-link" href="https://github.com/Quorinex/Kiro-Go" target="_blank" rel="noopener">
+                    <i class="fa-brands fa-github" aria-hidden="true"></i>
+                    <span data-i18n="footer.github"></span>
+                  </a>
+                </nav>
+              </div>
+            </div>
+            <div class="footer-meta">
+              <span>© <span id="footerYear"></span> Kiro-Go</span>
             </div>
           </div>
-          <div class="footer-actions">
-            <nav class="footer-links" aria-label="" data-i18n-aria-label="aria.resources">
-              <button class="footer-link" id="checkUpdateBtn" type="button">
-                <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-                <span data-i18n="update.check" data-update-label></span>
-              </button>
-              <a class="footer-link" href="https://github.com/Quorinex/Kiro-Go" target="_blank" rel="noopener">
-                <i class="fa-brands fa-github" aria-hidden="true"></i>
-                <span data-i18n="footer.github"></span>
-              </a>
-            </nav>
-          </div>
-        </div>
-        <div class="footer-meta">
-          <span>© <span id="footerYear"></span> Kiro-Go</span>
-        </div>
-      </div>
-    </footer>
+        </footer>
+      </main>
+    </div>
   </div>
 
   <!-- Modals -->

@@ -314,13 +314,13 @@ pre,
   border-color: var(--success);
 }
 .btn-sm {
-  height: 2.25rem;
-  padding: 0 0.875rem;
+  height: 2rem;
+  padding: 0 0.75rem;
   font-size: 0.8125rem;
   border-radius: var(--radius-md);
 }
 .btn-xs {
-  height: 1.5rem;
+  height: 1.625rem;
   padding: 0 0.5rem;
   font-size: 0.6875rem;
   border-radius: var(--radius-sm);
@@ -334,7 +334,10 @@ pre,
   padding: 0;
 }
 .btn-icon.btn-sm {
-  width: 1.875rem;
+  width: 2rem;
+}
+.btn-icon.btn-xs {
+  width: 1.625rem;
 }
 .btn-icon svg {
   width: 1rem;
@@ -2931,6 +2934,75 @@ img.brand-icon {
   white-space: nowrap;
 }
 
+/* Select-all chip — sits inline with toolbar inputs, custom checkbox */
+.select-all-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2rem;
+  padding: 0 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--foreground);
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+.select-all-label {
+  white-space: nowrap;
+}
+.kg-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border-radius: 4px;
+  border: 1.5px solid var(--muted-foreground);
+  background: var(--background);
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.kg-checkbox:hover {
+  border-color: var(--foreground);
+}
+.kg-checkbox:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.kg-checkbox:checked {
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  border-color: transparent;
+}
+.kg-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 4px;
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.kg-checkbox:indeterminate {
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  border-color: transparent;
+}
+.kg-checkbox:indeterminate::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  left: 3px;
+  width: 8px;
+  height: 2px;
+  background: #ffffff;
+  border-radius: 1px;
+}
+
 /* Accounts mobile layout */
 @media (max-width: 720px) {
   .card-header {
@@ -3390,6 +3462,7 @@ img.brand-icon {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 100vh;
   background: var(--background);
 }
 .app-main-bar {
@@ -3422,12 +3495,17 @@ img.brand-icon {
   cursor: pointer;
 }
 .app-main .container {
+  flex: 1 0 auto;
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
   padding: 1.5rem 1.5rem 2rem;
 }
-.app-main + .app-footer .app-footer-inner {
+.app-main > .app-footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+}
+.app-main > .app-footer .app-footer-inner {
   max-width: 1100px;
 }
 .tab[data-admin-only] {
