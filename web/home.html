@@ -210,12 +210,8 @@
     </div>
   </div>
 
-  <script src="/admin/home.js?v=__V__"></script>
   <script>
-    (function () {
-      var s = document.querySelector('script[src^="/admin/home.js"]');
-      if (s) s.src = '/admin/home.js?v=' + (window.__v || Date.now());
-    })();
+    document.write('<script src="/admin/home.js?v=' + (window.__v || Date.now()) + '"><\/script>');
   </script>
 </body>
 

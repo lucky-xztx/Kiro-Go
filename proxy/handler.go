@@ -3418,11 +3418,19 @@ func (h *Handler) serveAdminPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) serveHomePage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	http.ServeFile(w, r, "web/home.html")
 }
 
 func (h *Handler) serveStaticFile(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/admin/")
+	if strings.HasSuffix(path, "home.css") || strings.HasSuffix(path, "home.js") || strings.HasSuffix(path, "home.html") {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+	}
 	http.ServeFile(w, r, "web/"+path)
 }
 

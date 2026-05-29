@@ -95,9 +95,12 @@
   }
 
   function setEndpoints() {
-    $("claudeUrl").textContent = BASE + "/v1/messages";
-    $("openaiUrl").textContent = BASE + "/v1/chat/completions";
-    $("modelsUrl").textContent = BASE + "/v1/models";
+    var c = $("claudeUrl");
+    if (c) c.textContent = BASE + "/v1/messages";
+    var o = $("openaiUrl");
+    if (o) o.textContent = BASE + "/v1/chat/completions";
+    var m = $("modelsUrl");
+    if (m) m.textContent = BASE + "/v1/models";
   }
 
   function loadStatus() {
