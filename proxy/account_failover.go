@@ -88,6 +88,33 @@ func (h *Handler) disableAccountOverage(account *config.Account) {
 	h.pool.Reload()
 }
 
+// clearAccountBan re-enables an account that was previously auto-disabled and
+// clears its persisted ban status. Called when a definitive success proves the
+// account is healthy (e.g. a passing connectivity test), closing the loop that
+// disableAccount opened. No-op if the account is already active and enabled.
+func (h *Handler) clearAccountBan(account *config.Account) {
+	if account == nil {
+		return
+	}
+	if account.Enabled && (account.BanStatus == "" || account.BanStatus == "ACTIVE") {
+		return
+	}
+
+	updatedAccount := *account
+	updatedAccount.Enabled = true
+	updatedAccount.BanStatus = "ACTIVE"
+	updatedAccount.BanReason = ""
+	updatedAccount.BanTime = 0
+
+	if err := config.UpdateAccount(account.ID, updatedAccount); err != nil {
+		logger.Warnf("[AccountFailover] Failed to clear ban for %s: %v", account.Email, err)
+		return
+	}
+
+	logger.Infof("[AccountFailover] Cleared ban for %s after successful test", account.Email)
+	h.pool.Reload()
+}
+
 func (h *Handler) handleAccountFailure(account *config.Account, err error) {
 	if account == nil || err == nil {
 		return

@@ -95,6 +95,19 @@ type Account struct {
 	NextResetDate string  `json:"nextResetDate,omitempty"` // Date when usage resets (YYYY-MM-DD)
 	LastRefresh   int64   `json:"lastRefresh,omitempty"`   // Last info refresh timestamp
 
+	// Codex (ChatGPT) rate-limit windows. Unlike Kiro's credit quota, ChatGPT
+	// plans expose two rolling usage windows as percentages, not credit counts:
+	//   - Primary  ≈ 5 hours
+	//   - Secondary ≈ 7 days (weekly)
+	// Percent fields are 0-100. ResetAt is a Unix-seconds timestamp (0 = unknown).
+	// Only populated for accounts with Upstream == "codex".
+	CodexPrimaryPercent      float64 `json:"codexPrimaryPercent,omitempty"`
+	CodexPrimaryResetAt      int64   `json:"codexPrimaryResetAt,omitempty"`
+	CodexPrimaryWindowSecs   int     `json:"codexPrimaryWindowSecs,omitempty"`
+	CodexSecondaryPercent    float64 `json:"codexSecondaryPercent,omitempty"`
+	CodexSecondaryResetAt    int64   `json:"codexSecondaryResetAt,omitempty"`
+	CodexSecondaryWindowSecs int     `json:"codexSecondaryWindowSecs,omitempty"`
+
 	// Trial usage tracking
 	TrialUsageCurrent float64 `json:"trialUsageCurrent,omitempty"` // Trial quota current usage
 	TrialUsageLimit   float64 `json:"trialUsageLimit,omitempty"`   // Trial quota total limit
@@ -230,6 +243,16 @@ type AccountInfo struct {
 	TrialUsagePercent float64
 	TrialStatus       string
 	TrialExpiresAt    int64
+
+	// Codex rate-limit windows (percentages 0-100). See Account for semantics.
+	// IsCodex gates whether UpdateAccountInfo writes these fields.
+	IsCodex                  bool
+	CodexPrimaryPercent      float64
+	CodexPrimaryResetAt      int64
+	CodexPrimaryWindowSecs   int
+	CodexSecondaryPercent    float64
+	CodexSecondaryResetAt    int64
+	CodexSecondaryWindowSecs int
 }
 
 // Version current version
@@ -637,6 +660,14 @@ func UpdateAccountInfo(id string, info AccountInfo) error {
 			cfg.Accounts[i].TrialUsagePercent = info.TrialUsagePercent
 			cfg.Accounts[i].TrialStatus = info.TrialStatus
 			cfg.Accounts[i].TrialExpiresAt = info.TrialExpiresAt
+			if info.IsCodex {
+				cfg.Accounts[i].CodexPrimaryPercent = info.CodexPrimaryPercent
+				cfg.Accounts[i].CodexPrimaryResetAt = info.CodexPrimaryResetAt
+				cfg.Accounts[i].CodexPrimaryWindowSecs = info.CodexPrimaryWindowSecs
+				cfg.Accounts[i].CodexSecondaryPercent = info.CodexSecondaryPercent
+				cfg.Accounts[i].CodexSecondaryResetAt = info.CodexSecondaryResetAt
+				cfg.Accounts[i].CodexSecondaryWindowSecs = info.CodexSecondaryWindowSecs
+			}
 			return Save()
 		}
 	}

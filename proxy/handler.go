@@ -281,7 +281,7 @@ func (h *Handler) refreshAllAccounts() {
 				continue
 			}
 			config.UpdateAccountInfo(account.ID, *info)
-			logger.Infof("[BackgroundRefresh] Codex %s: %s %.0f%%", account.Email, info.SubscriptionType, info.UsagePercent*100)
+			logger.Infof("[BackgroundRefresh] Codex %s: %s 5h=%.0f%% 7d=%.0f%%", account.Email, info.SubscriptionType, info.CodexPrimaryPercent, info.CodexSecondaryPercent)
 			continue
 		}
 
@@ -2292,47 +2292,53 @@ func (h *Handler) apiGetAccounts(w http.ResponseWriter, r *http.Request) {
 		stats := statsMap[a.ID]
 
 		result[i] = map[string]interface{}{
-			"id":                a.ID,
-			"email":             a.Email,
-			"userId":            a.UserId,
-			"nickname":          a.Nickname,
-			"authMethod":        a.AuthMethod,
-			"provider":          a.Provider,
-			"upstream":          providers.Normalize(a.Upstream),
-			"region":            a.Region,
-			"enabled":           a.Enabled,
-			"banStatus":         a.BanStatus,
-			"banReason":         a.BanReason,
-			"banTime":           a.BanTime,
-			"expiresAt":         a.ExpiresAt,
-			"hasToken":          a.AccessToken != "",
-			"machineId":         a.MachineId,
-			"weight":            a.Weight,
-			"overageStatus":     a.OverageStatus,
-			"overageCapability": a.OverageCapability,
-			"overageCap":        a.OverageCap,
-			"overageRate":       a.OverageRate,
-			"currentOverages":   a.CurrentOverages,
-			"overageCheckedAt":  a.OverageCheckedAt,
-			"proxyURL":          a.ProxyURL,
-			"subscriptionType":  a.SubscriptionType,
-			"subscriptionTitle": a.SubscriptionTitle,
-			"daysRemaining":     a.DaysRemaining,
-			"usageCurrent":      a.UsageCurrent,
-			"usageLimit":        a.UsageLimit,
-			"usagePercent":      a.UsagePercent,
-			"nextResetDate":     a.NextResetDate,
-			"lastRefresh":       a.LastRefresh,
-			"trialUsageCurrent": a.TrialUsageCurrent,
-			"trialUsageLimit":   a.TrialUsageLimit,
-			"trialUsagePercent": a.TrialUsagePercent,
-			"trialStatus":       a.TrialStatus,
-			"trialExpiresAt":    a.TrialExpiresAt,
-			"requestCount":      stats.RequestCount,
-			"errorCount":        stats.ErrorCount,
-			"totalTokens":       stats.TotalTokens,
-			"totalCredits":      stats.TotalCredits,
-			"lastUsed":          stats.LastUsed,
+			"id":                       a.ID,
+			"email":                    a.Email,
+			"userId":                   a.UserId,
+			"nickname":                 a.Nickname,
+			"authMethod":               a.AuthMethod,
+			"provider":                 a.Provider,
+			"upstream":                 providers.Normalize(a.Upstream),
+			"region":                   a.Region,
+			"enabled":                  a.Enabled,
+			"banStatus":                a.BanStatus,
+			"banReason":                a.BanReason,
+			"banTime":                  a.BanTime,
+			"expiresAt":                a.ExpiresAt,
+			"hasToken":                 a.AccessToken != "",
+			"machineId":                a.MachineId,
+			"weight":                   a.Weight,
+			"overageStatus":            a.OverageStatus,
+			"overageCapability":        a.OverageCapability,
+			"overageCap":               a.OverageCap,
+			"overageRate":              a.OverageRate,
+			"currentOverages":          a.CurrentOverages,
+			"overageCheckedAt":         a.OverageCheckedAt,
+			"proxyURL":                 a.ProxyURL,
+			"subscriptionType":         a.SubscriptionType,
+			"subscriptionTitle":        a.SubscriptionTitle,
+			"daysRemaining":            a.DaysRemaining,
+			"usageCurrent":             a.UsageCurrent,
+			"usageLimit":               a.UsageLimit,
+			"usagePercent":             a.UsagePercent,
+			"nextResetDate":            a.NextResetDate,
+			"lastRefresh":              a.LastRefresh,
+			"codexPrimaryPercent":      a.CodexPrimaryPercent,
+			"codexPrimaryResetAt":      a.CodexPrimaryResetAt,
+			"codexPrimaryWindowSecs":   a.CodexPrimaryWindowSecs,
+			"codexSecondaryPercent":    a.CodexSecondaryPercent,
+			"codexSecondaryResetAt":    a.CodexSecondaryResetAt,
+			"codexSecondaryWindowSecs": a.CodexSecondaryWindowSecs,
+			"trialUsageCurrent":        a.TrialUsageCurrent,
+			"trialUsageLimit":          a.TrialUsageLimit,
+			"trialUsagePercent":        a.TrialUsagePercent,
+			"trialStatus":              a.TrialStatus,
+			"trialExpiresAt":           a.TrialExpiresAt,
+			"requestCount":             stats.RequestCount,
+			"errorCount":               stats.ErrorCount,
+			"totalTokens":              stats.TotalTokens,
+			"totalCredits":             stats.TotalCredits,
+			"lastUsed":                 stats.LastUsed,
 		}
 	}
 	json.NewEncoder(w).Encode(result)
@@ -3208,6 +3214,8 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 			})
 			return
 		}
+		// 测试成功证明账户健康：若此前被自动封禁/禁用，立即解封闭环。
+		h.clearAccountBan(account)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":        true,
 			"reply":          content,
@@ -3258,6 +3266,8 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
+	// 测试成功证明账户健康：若此前被自动封禁/禁用，立即解封闭环。
+	h.clearAccountBan(account)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"reply":   content,
@@ -3295,6 +3305,9 @@ func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id s
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+		// 刷新成功证明 token 有效、账户健康：先解封（整条写回，带旧 usage），
+		// 再用 UpdateAccountInfo 按字段覆盖 usage，避免覆盖掉解封状态。
+		h.clearAccountBan(account)
 		if err := config.UpdateAccountInfo(id, *info); err != nil {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -3424,49 +3437,55 @@ func (h *Handler) apiGetAccountFull(w http.ResponseWriter, r *http.Request, id s
 
 	// 返回完整账号信息（包含敏感字段）
 	result := map[string]interface{}{
-		"id":                account.ID,
-		"email":             account.Email,
-		"userId":            account.UserId,
-		"nickname":          account.Nickname,
-		"accessToken":       account.AccessToken,
-		"refreshToken":      account.RefreshToken,
-		"clientId":          account.ClientID,
-		"clientSecret":      account.ClientSecret,
-		"authMethod":        account.AuthMethod,
-		"provider":          account.Provider,
-		"region":            account.Region,
-		"expiresAt":         account.ExpiresAt,
-		"machineId":         account.MachineId,
-		"weight":            account.Weight,
-		"overageStatus":     account.OverageStatus,
-		"overageCapability": account.OverageCapability,
-		"overageCap":        account.OverageCap,
-		"overageRate":       account.OverageRate,
-		"currentOverages":   account.CurrentOverages,
-		"overageCheckedAt":  account.OverageCheckedAt,
-		"proxyURL":          account.ProxyURL,
-		"enabled":           account.Enabled,
-		"banStatus":         account.BanStatus,
-		"banReason":         account.BanReason,
-		"banTime":           account.BanTime,
-		"subscriptionType":  account.SubscriptionType,
-		"subscriptionTitle": account.SubscriptionTitle,
-		"daysRemaining":     account.DaysRemaining,
-		"usageCurrent":      account.UsageCurrent,
-		"usageLimit":        account.UsageLimit,
-		"usagePercent":      account.UsagePercent,
-		"nextResetDate":     account.NextResetDate,
-		"lastRefresh":       account.LastRefresh,
-		"trialUsageCurrent": account.TrialUsageCurrent,
-		"trialUsageLimit":   account.TrialUsageLimit,
-		"trialUsagePercent": account.TrialUsagePercent,
-		"trialStatus":       account.TrialStatus,
-		"trialExpiresAt":    account.TrialExpiresAt,
-		"requestCount":      stats.RequestCount,
-		"errorCount":        stats.ErrorCount,
-		"totalTokens":       stats.TotalTokens,
-		"totalCredits":      stats.TotalCredits,
-		"lastUsed":          stats.LastUsed,
+		"id":                       account.ID,
+		"email":                    account.Email,
+		"userId":                   account.UserId,
+		"nickname":                 account.Nickname,
+		"accessToken":              account.AccessToken,
+		"refreshToken":             account.RefreshToken,
+		"clientId":                 account.ClientID,
+		"clientSecret":             account.ClientSecret,
+		"authMethod":               account.AuthMethod,
+		"provider":                 account.Provider,
+		"region":                   account.Region,
+		"expiresAt":                account.ExpiresAt,
+		"machineId":                account.MachineId,
+		"weight":                   account.Weight,
+		"overageStatus":            account.OverageStatus,
+		"overageCapability":        account.OverageCapability,
+		"overageCap":               account.OverageCap,
+		"overageRate":              account.OverageRate,
+		"currentOverages":          account.CurrentOverages,
+		"overageCheckedAt":         account.OverageCheckedAt,
+		"proxyURL":                 account.ProxyURL,
+		"enabled":                  account.Enabled,
+		"banStatus":                account.BanStatus,
+		"banReason":                account.BanReason,
+		"banTime":                  account.BanTime,
+		"subscriptionType":         account.SubscriptionType,
+		"subscriptionTitle":        account.SubscriptionTitle,
+		"daysRemaining":            account.DaysRemaining,
+		"usageCurrent":             account.UsageCurrent,
+		"usageLimit":               account.UsageLimit,
+		"usagePercent":             account.UsagePercent,
+		"nextResetDate":            account.NextResetDate,
+		"lastRefresh":              account.LastRefresh,
+		"codexPrimaryPercent":      account.CodexPrimaryPercent,
+		"codexPrimaryResetAt":      account.CodexPrimaryResetAt,
+		"codexPrimaryWindowSecs":   account.CodexPrimaryWindowSecs,
+		"codexSecondaryPercent":    account.CodexSecondaryPercent,
+		"codexSecondaryResetAt":    account.CodexSecondaryResetAt,
+		"codexSecondaryWindowSecs": account.CodexSecondaryWindowSecs,
+		"trialUsageCurrent":        account.TrialUsageCurrent,
+		"trialUsageLimit":          account.TrialUsageLimit,
+		"trialUsagePercent":        account.TrialUsagePercent,
+		"trialStatus":              account.TrialStatus,
+		"trialExpiresAt":           account.TrialExpiresAt,
+		"requestCount":             stats.RequestCount,
+		"errorCount":               stats.ErrorCount,
+		"totalTokens":              stats.TotalTokens,
+		"totalCredits":             stats.TotalCredits,
+		"lastUsed":                 stats.LastUsed,
 	}
 
 	json.NewEncoder(w).Encode(result)

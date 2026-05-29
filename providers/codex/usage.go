@@ -76,6 +76,7 @@ func GetUsage(accessToken, accountID string) (*CodexUsageResponse, error) {
 func RefreshCodexAccountInfo(accessToken, refreshToken, accountID string) (*config.AccountInfo, error) {
 	info := &config.AccountInfo{
 		LastRefresh: time.Now().Unix(),
+		IsCodex:     true,
 	}
 
 	usage, err := GetUsage(accessToken, accountID)
@@ -86,18 +87,40 @@ func RefreshCodexAccountInfo(accessToken, refreshToken, accountID string) (*conf
 	info.SubscriptionType = formatPlanType(usage.PlanType)
 	info.SubscriptionTitle = formatPlanTitle(usage.PlanType)
 
-	if usage.RateLimit != nil && usage.RateLimit.PrimaryWindow != nil {
-		// upstream `used_percent` is a 0-100 number; mirror that into
-		// usageCurrent (so the existing 0-100 display works) and store
-		// the 0.0-1.0 fractional form in usagePercent for compatibility
-		// with renderers that scale it back.
-		pct := usage.RateLimit.PrimaryWindow.UsedPercent
-		info.UsageCurrent = pct
-		info.UsageLimit = 100
-		info.UsagePercent = pct / 100
+	// ChatGPT plans do NOT expose a credit quota like Kiro. They expose two
+	// rolling rate-limit windows as percentages (0-100): a ~5h primary window
+	// and a ~7d secondary (weekly) window. Map them to the dedicated Codex
+	// fields rather than forcing them into Kiro's UsageCurrent/UsageLimit.
+	if rl := usage.RateLimit; rl != nil {
+		if w := rl.PrimaryWindow; w != nil {
+			info.CodexPrimaryPercent = w.UsedPercent
+			info.CodexPrimaryWindowSecs = w.LimitWindowSeconds
+			info.CodexPrimaryResetAt = resolveResetAt(w)
+		}
+		if w := rl.SecondaryWindow; w != nil {
+			info.CodexSecondaryPercent = w.UsedPercent
+			info.CodexSecondaryWindowSecs = w.LimitWindowSeconds
+			info.CodexSecondaryResetAt = resolveResetAt(w)
+		}
 	}
 
 	return info, nil
+}
+
+// resolveResetAt returns the absolute Unix-seconds reset timestamp for a
+// window, preferring the explicit reset_at when present and otherwise deriving
+// it from reset_after_seconds relative to now. Returns 0 when unknown.
+func resolveResetAt(w *CodexRateWindow) int64 {
+	if w == nil {
+		return 0
+	}
+	if w.ResetAt > 0 {
+		return w.ResetAt
+	}
+	if w.ResetAfterSeconds > 0 {
+		return time.Now().Unix() + w.ResetAfterSeconds
+	}
+	return 0
 }
 
 func formatPlanType(plan string) string {
