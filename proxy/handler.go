@@ -3129,17 +3129,69 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
-	if err := h.ensureValidToken(account); err != nil {
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
-		return
-	}
-
 	// Parse test model from request body (optional)
 	var req struct {
 		Model string `json:"model"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+
+	upstream := providers.Normalize(account.Upstream)
+	if upstream == "codex" {
+		if err := h.ensureCodexToken(account); err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
+			return
+		}
+		model := req.Model
+		if model == "" {
+			model = "gpt-5.5"
+		}
+		model = codexModelForRequest(model)
+		codexReq := codex.ConvertOpenAIToCodex(
+			[]codex.OpenAIChatMessage{{Role: "user", Content: "say ok"}},
+			model, false, nil, "medium",
+		)
+		var content string
+		cb := &codex.StreamCallback{
+			OnEvent: func(eventType string, data json.RawMessage) {
+				if eventType != "response.completed" {
+					return
+				}
+				var resp struct {
+					Output []struct {
+						Content []struct {
+							Text string `json:"text"`
+						} `json:"content"`
+					} `json:"output"`
+				}
+				if json.Unmarshal(data, &resp) == nil {
+					for _, o := range resp.Output {
+						for _, c := range o.Content {
+							content += c.Text
+						}
+					}
+				}
+			},
+		}
+		if err := codex.CallCodexAPI(account.AccessToken, account.UserId, codexReq, cb); err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"reply":   content,
+			"model":   model,
+		})
+		return
+	}
+
+	// Default: Kiro upstream
+	if err := h.ensureValidToken(account); err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
+		return
+	}
 	if req.Model == "" {
 		req.Model = "claude-sonnet-4"
 	}
@@ -3404,6 +3456,17 @@ func (h *Handler) apiGetAccountModels(w http.ResponseWriter, r *http.Request, id
 
 // apiGetAccountModelsCached 返回账号已缓存的模型列表（不实时拉取）
 func (h *Handler) apiGetAccountModelsCached(w http.ResponseWriter, r *http.Request, id string) {
+	for _, a := range config.GetAccounts() {
+		if a.ID == id && providers.Normalize(a.Upstream) == "codex" {
+			out := make([]string, len(codexModels))
+			copy(out, codexModels)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"models":  out,
+			})
+			return
+		}
+	}
 	models := h.pool.GetModelList(id)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
