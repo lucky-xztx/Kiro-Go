@@ -362,20 +362,24 @@ func (h *Handler) apiListMyLogs(w http.ResponseWriter, r *http.Request) {
 	rpm, _ := store.RequestRate(store.LogQuery{UserID: u.ID}, now-60)
 	tpmStats, _ := store.RequestRate(store.LogQuery{UserID: u.ID}, now-60)
 	keys, _ := store.ListApiKeysForUser(u.ID)
-	keyMap := make(map[string]string, len(keys))
+	type keyInfo struct{ Name, Masked string }
+	keyMap := make(map[string]keyInfo, len(keys))
 	for _, k := range keys {
-		keyMap[k.ID] = k.Name
-		if k.Name == "" {
-			keyMap[k.ID] = "未命名"
+		name := k.Name
+		if name == "" {
+			name = "未命名"
 		}
+		keyMap[k.ID] = keyInfo{Name: name, Masked: store.MaskApiKey(k.Key)}
 	}
 	enriched := make([]map[string]interface{}, 0, len(logs))
 	for _, l := range logs {
+		ki := keyMap[l.ApiKeyID]
 		enriched = append(enriched, map[string]interface{}{
 			"id":           l.ID,
 			"createdAt":    l.CreatedAt,
 			"apiKeyId":     l.ApiKeyID,
-			"apiKeyName":   keyMap[l.ApiKeyID],
+			"apiKeyName":   ki.Name,
+			"apiKeyMasked": ki.Masked,
 			"model":        l.Model,
 			"provider":     l.Provider,
 			"status":       l.Status,

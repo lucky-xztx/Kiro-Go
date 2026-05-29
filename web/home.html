@@ -94,7 +94,17 @@
       </div>
     </section>
 
-    <section class="card logs-card" id="logsCard" hidden>
+    <section class="card keys-card" id="keysCard" hidden>
+      <div class="logs-head">
+        <h2>我的密钥</h2>
+        <button type="button" class="btn-pill keys-new-btn" id="newKeyBtn">+ 新建</button>
+      </div>
+      <div class="keys-list" id="keysList">
+        <div class="keys-empty">加载中...</div>
+      </div>
+    </section>
+
+    <section class="card logs-card" id="logsCard">
       <div class="logs-head">
         <h2>调用明细</h2>
         <div class="logs-pills">
@@ -116,7 +126,7 @@
             </tr>
           </thead>
           <tbody id="logsBody">
-            <tr class="logs-empty"><td colspan="7">加载中...</td></tr>
+            <tr class="logs-empty"><td colspan="7">请先登录查看调用明细</td></tr>
           </tbody>
         </table>
       </div>
@@ -146,10 +156,10 @@
           <input type="text" name="username" required minlength="3" maxlength="32"
             placeholder="字母 / 数字，3-32 位" />
         </label>
-        <label data-only="register" hidden>
+        <!-- <label data-only="register" hidden>
           <span>邮箱（可选）</span>
           <input type="email" name="email" placeholder="you@example.com" />
-        </label>
+        </label> -->
         <label>
           <span>密码</span>
           <input type="password" name="password" required minlength="6"

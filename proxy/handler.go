@@ -12,6 +12,7 @@ import (
 	"kiro-go/providers/codex"
 	"kiro-go/store"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -400,9 +401,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 公开统计（首页用，无需鉴权，只暴露非敏感字段）
 	case path == "/api/public/stats":
 		h.handlePublicStats(w, r)
+	case path == "/api/public/logs":
+		h.handlePublicLogs(w, r)
 
 	// 用户与个人 Key 接口（注册/登录/我的 Key）
-	case strings.HasPrefix(path, "/api/") && path != "/api/event_logging/batch" && path != "/api/public/stats":
+	case strings.HasPrefix(path, "/api/") && path != "/api/event_logging/batch" && path != "/api/public/stats" && path != "/api/public/logs":
 		if h.handleUserAPI(w, r) {
 			return
 		}
@@ -3462,6 +3465,74 @@ func (h *Handler) handlePublicStats(w http.ResponseWriter, r *http.Request) {
 		"successRate":   rate,
 		"totalRequests": total,
 		"totalTokens":   tokens,
+	})
+}
+
+// handlePublicLogs 首页用的公开调用明细：跨所有用户聚合，key 仅显示脱敏值。
+func (h *Handler) handlePublicLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	filter := store.LogQuery{
+		Limit:  pageSize,
+		Offset: (page - 1) * pageSize,
+	}
+	logs, err := store.ListRequestLogs(filter)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	total, _ := store.CountRequestLogs(store.LogQuery{})
+	now := time.Now().Unix()
+	rate, _ := store.RequestRate(store.LogQuery{}, now-60)
+
+	keys, _ := store.ListAllApiKeys()
+	type keyInfo struct{ Masked string }
+	keyMap := make(map[string]keyInfo, len(keys))
+	for _, k := range keys {
+		keyMap[k.ID] = keyInfo{Masked: store.MaskApiKey(k.Key)}
+	}
+
+	enriched := make([]map[string]interface{}, 0, len(logs))
+	for _, l := range logs {
+		masked := keyMap[l.ApiKeyID].Masked
+		if masked == "" {
+			masked = "-"
+		}
+		enriched = append(enriched, map[string]interface{}{
+			"id":           l.ID,
+			"createdAt":    l.CreatedAt,
+			"apiKeyMasked": masked,
+			"model":        l.Model,
+			"provider":     l.Provider,
+			"status":       l.Status,
+			"inputTokens":  l.InputTokens,
+			"outputTokens": l.OutputTokens,
+			"latencyMs":    l.LatencyMs,
+			"path":         l.Path,
+		})
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"logs":     enriched,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+		"rpm":      rate.Requests,
+		"tpm":      rate.Tokens,
 	})
 }
 

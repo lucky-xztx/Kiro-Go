@@ -384,10 +384,22 @@ h1 {
   font-weight: 600;
   font-family: "SF Mono", "Fira Code", Consolas, monospace;
 }
+.key-cell {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.25;
+}
 .key-name {
   font-family: "SF Mono", "Fira Code", Consolas, monospace;
   font-size: 0.8rem;
   color: #3d3d5c;
+}
+.key-masked {
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.72rem;
+  color: #7a7a9a;
+  letter-spacing: 0.3px;
 }
 .badge-status {
   display: inline-flex;

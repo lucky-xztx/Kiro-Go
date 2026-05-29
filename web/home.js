@@ -227,16 +227,6 @@
       if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
       else entry.setAttribute("hidden", "");
     }
-    var logsCard = $("logsCard");
-    if (logsCard) {
-      if (currentUser) {
-        logsCard.removeAttribute("hidden");
-        logsState.page = 1;
-        loadLogs(1);
-      } else {
-        logsCard.setAttribute("hidden", "");
-      }
-    }
   }
 
   function loadMe() {
@@ -396,7 +386,7 @@
     logsState.page = page || 1;
     body.innerHTML = '<tr class="logs-empty"><td colspan="7">加载中...</td></tr>';
     if (pager) pager.innerHTML = "";
-    var url = "/api/me/logs?page=" + logsState.page + "&pageSize=" + logsState.pageSize;
+    var url = "/api/public/logs?page=" + logsState.page + "&pageSize=" + logsState.pageSize;
     api(url)
       .then(function (data) {
         logsState.total = data.total || 0;
@@ -423,7 +413,7 @@
       return;
     }
     var html = logs.map(function (l, idx) {
-      var keyName = l.apiKeyName || "-";
+      var keyMasked = l.apiKeyMasked || "-";
       var model = l.model || "-";
       var detailKey = "log-" + idx;
       var detail = {
@@ -431,7 +421,6 @@
         path: l.path,
         provider: l.provider,
         status: l.status,
-        credits: l.credits,
         error: l.error,
         latencyMs: l.latencyMs,
         inputTokens: l.inputTokens,
@@ -440,7 +429,7 @@
       return (
         '<tr class="logs-row" data-detail="' + detailKey + '">' +
           '<td>' + escapeHTML(formatTime(l.createdAt)) + '</td>' +
-          '<td><span class="key-name">' + escapeHTML(keyName) + '</span></td>' +
+          '<td><span class="key-masked">' + escapeHTML(keyMasked) + '</span></td>' +
           '<td><span class="model-pill">' + escapeHTML(model) + '</span></td>' +
           '<td><span class="badge-latency">' + escapeHTML(formatLatency(l.latencyMs)) + '</span></td>' +
           '<td class="tokens-cell">' + formatNumber(l.inputTokens || 0) + '</td>' +
@@ -526,6 +515,7 @@
     bindCopy();
     loadStatus();
     loadModels();
+    loadLogs(1);
     bindAuthModal();
     loadMe();
     setInterval(loadStatus, 30000);
