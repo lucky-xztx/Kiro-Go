@@ -40,18 +40,8 @@ func codexModelForRequest(model string) string {
 var codexModels = []string{
 	"gpt-5.5",
 	"gpt-5.4",
-	"gpt-5.4-mini",
 	"gpt-5.3-codex",
 	"gpt-5.3-codex-spark",
-	"gpt-5.2",
-	"gpt-4o",
-	"gpt-4",
-	"o1",
-	"o1-mini",
-	"o1-pro",
-	"o3",
-	"o3-mini",
-	"o4-mini",
 }
 
 // getNextCodexAccount returns the next available Codex upstream account.

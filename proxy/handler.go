@@ -269,6 +269,23 @@ func (h *Handler) refreshAllAccounts() {
 			continue
 		}
 
+		// ---------- Codex upstream ----------
+		if providers.Normalize(account.Upstream) == "codex" {
+			if err := h.ensureCodexToken(account); err != nil {
+				logger.Warnf("[BackgroundRefresh] Codex token refresh failed for %s: %v", account.Email, err)
+				continue
+			}
+			info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.RefreshToken, account.UserId)
+			if err != nil {
+				logger.Warnf("[BackgroundRefresh] Codex info refresh failed for %s: %v", account.Email, err)
+				continue
+			}
+			config.UpdateAccountInfo(account.ID, *info)
+			logger.Infof("[BackgroundRefresh] Codex %s: %s %.0f%%", account.Email, info.SubscriptionType, info.UsagePercent*100)
+			continue
+		}
+
+		// ---------- Kiro (default) upstream ----------
 		// 检查 token 是否需要刷新
 		if account.ExpiresAt > 0 && time.Now().Unix() > account.ExpiresAt-tokenRefreshSkewSeconds {
 			newAccessToken, newRefreshToken, newExpiresAt, profileArn, err := auth.RefreshToken(account)
@@ -3149,27 +3166,21 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 		model = codexModelForRequest(model)
 		codexReq := codex.ConvertOpenAIToCodex(
 			[]codex.OpenAIChatMessage{{Role: "user", Content: "say ok"}},
-			model, false, nil, "medium",
+			model, true, nil, "medium",
 		)
 		codexReq.Instructions = "You are a helpful assistant. Reply briefly."
+		storeFalse := false
+		codexReq.Store = &storeFalse
+		codexReq.Include = nil
 		var content string
 		cb := &codex.StreamCallback{
 			OnEvent: func(eventType string, data json.RawMessage) {
-				if eventType != "response.completed" {
-					return
-				}
-				var resp struct {
-					Output []struct {
-						Content []struct {
-							Text string `json:"text"`
-						} `json:"content"`
-					} `json:"output"`
-				}
-				if json.Unmarshal(data, &resp) == nil {
-					for _, o := range resp.Output {
-						for _, c := range o.Content {
-							content += c.Text
-						}
+				if eventType == "response.output_text.delta" {
+					var evt struct {
+						Delta string `json:"delta"`
+					}
+					if json.Unmarshal(data, &evt) == nil {
+						content += evt.Delta
 					}
 				}
 			},
@@ -3250,6 +3261,32 @@ func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 
+	// ---------- Codex upstream ----------
+	if providers.Normalize(account.Upstream) == "codex" {
+		if err := h.ensureCodexToken(account); err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
+			return
+		}
+		info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.RefreshToken, account.UserId)
+		if err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		if err := config.UpdateAccountInfo(id, *info); err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"info":    info,
+		})
+		return
+	}
+
+	// ---------- Kiro (default) upstream ----------
 	// 先尝试刷新 token（不管是否过期，确保 token 有效）
 	refreshTokenIfNeeded := func() error {
 		if account.RefreshToken == "" {
