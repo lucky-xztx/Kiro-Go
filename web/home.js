@@ -227,6 +227,15 @@
       if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
       else entry.setAttribute("hidden", "");
     }
+    var keysCard = $("keysCard");
+    if (keysCard) {
+      if (currentUser) {
+        keysCard.removeAttribute("hidden");
+        loadMyKeys();
+      } else {
+        keysCard.setAttribute("hidden", "");
+      }
+    }
   }
 
   function loadMe() {
@@ -347,6 +356,173 @@
           if (submit) submit.disabled = false;
         });
     });
+  }
+
+  /* ---------------------- My keys ---------------------- */
+
+  function loadMyKeys() {
+    var listEl = $("keysList");
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="keys-empty">加载中...</div>';
+    api("/api/me/keys")
+      .then(function (d) {
+        renderKeys((d && d.keys) || []);
+      })
+      .catch(function (e) {
+        listEl.innerHTML = '<div class="keys-empty">' + escapeHTML(e.message || "加载失败") + "</div>";
+      });
+  }
+
+  function renderKeys(keys) {
+    var listEl = $("keysList");
+    if (!listEl) return;
+    if (!keys.length) {
+      listEl.innerHTML = '<div class="keys-empty">还没有 Key，点击右上角"新建"创建一把</div>';
+      return;
+    }
+    listEl.innerHTML = keys.map(function (k) {
+      var name = k.name || "未命名";
+      var statusCls = k.enabled ? "is-on" : "is-off";
+      var statusLabel = k.enabled ? "启用" : "停用";
+      var tokenLine = (k.tokenLimit > 0)
+        ? formatNumber(k.tokensUsed || 0) + " / " + formatNumber(k.tokenLimit)
+        : formatNumber(k.tokensUsed || 0) + " / ∞";
+      var reqLine = formatNumber(k.requestsCount || 0);
+      return (
+        '<div class="key-row" data-id="' + escapeHTML(k.id) + '">' +
+          '<div class="key-meta">' +
+            '<span class="key-row-name">' +
+              escapeHTML(name) +
+              ' <span class="key-status ' + statusCls + '">' + statusLabel + '</span>' +
+            '</span>' +
+            '<span class="key-row-mask">' + escapeHTML(k.masked || "-") + '</span>' +
+          '</div>' +
+          '<div class="key-stats">' +
+            '<span>Token <strong>' + tokenLine + '</strong></span>' +
+            '<span>请求 <strong>' + reqLine + '</strong></span>' +
+          '</div>' +
+          '<div class="key-actions">' +
+            '<button type="button" class="btn-mini" data-act="toggle">' + (k.enabled ? "停用" : "启用") + '</button>' +
+            '<button type="button" class="btn-mini btn-danger" data-act="delete">删除</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+    listEl.querySelectorAll(".key-row").forEach(function (row) {
+      var id = row.getAttribute("data-id");
+      row.querySelectorAll("button[data-act]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var act = btn.getAttribute("data-act");
+          if (act === "delete") {
+            if (!confirm("确认删除这把 Key？")) return;
+            api("/api/me/keys/" + encodeURIComponent(id), { method: "DELETE" })
+              .then(loadMyKeys)
+              .then(function () { showToast("已删除"); })
+              .catch(function (e) { showToast(e.message || "删除失败"); });
+          } else if (act === "toggle") {
+            var enabled = btn.textContent === "启用";
+            api("/api/me/keys/" + encodeURIComponent(id), {
+              method: "PUT",
+              body: JSON.stringify({ enabled: enabled }),
+            })
+              .then(loadMyKeys)
+              .then(function () { showToast(enabled ? "已启用" : "已停用"); })
+              .catch(function (e) { showToast(e.message || "操作失败"); });
+          }
+        });
+      });
+    });
+  }
+
+  function openNewKey() {
+    var overlay = $("newKeyOverlay");
+    if (!overlay) return;
+    overlay.removeAttribute("hidden");
+    var form = $("newKeyForm");
+    if (form) form.reset();
+    var err = $("newKeyError");
+    if (err) err.textContent = "";
+    setTimeout(function () {
+      var inp = form && form.querySelector('input[name="name"]');
+      if (inp) inp.focus();
+    }, 30);
+  }
+
+  function closeNewKey() {
+    var overlay = $("newKeyOverlay");
+    if (overlay) overlay.setAttribute("hidden", "");
+  }
+
+  function showCreatedKey(value) {
+    var overlay = $("showKeyOverlay");
+    var box = $("newKeyValue");
+    if (!overlay || !box) return;
+    box.textContent = value;
+    overlay.removeAttribute("hidden");
+  }
+
+  function bindKeyControls() {
+    var newBtn = $("newKeyBtn");
+    if (newBtn) newBtn.addEventListener("click", openNewKey);
+    var newClose = $("newKeyClose");
+    if (newClose) newClose.addEventListener("click", closeNewKey);
+    var newOverlay = $("newKeyOverlay");
+    if (newOverlay) {
+      newOverlay.addEventListener("click", function (e) {
+        if (e.target === newOverlay) closeNewKey();
+      });
+    }
+    var newForm = $("newKeyForm");
+    if (newForm) {
+      newForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var fd = new FormData(newForm);
+        var body = {
+          name: (fd.get("name") || "").toString().trim(),
+          tokenLimit: parseInt(fd.get("tokenLimit") || "0", 10) || 0,
+          creditLimit: parseFloat(fd.get("creditLimit") || "0") || 0,
+        };
+        var err = $("newKeyError");
+        if (err) err.textContent = "";
+        var submit = $("newKeySubmit");
+        if (submit) submit.disabled = true;
+        api("/api/me/keys", { method: "POST", body: JSON.stringify(body) })
+          .then(function (d) {
+            closeNewKey();
+            loadMyKeys();
+            if (d && d.key && d.key.key) showCreatedKey(d.key.key);
+            else showToast("已创建");
+          })
+          .catch(function (e) {
+            if (err) err.textContent = e.message || "创建失败";
+          })
+          .then(function () {
+            if (submit) submit.disabled = false;
+          });
+      });
+    }
+    var showClose = $("showKeyClose");
+    if (showClose) showClose.addEventListener("click", function () {
+      $("showKeyOverlay").setAttribute("hidden", "");
+    });
+    var showDone = $("showKeyDone");
+    if (showDone) showDone.addEventListener("click", function () {
+      $("showKeyOverlay").setAttribute("hidden", "");
+    });
+    var showOverlay = $("showKeyOverlay");
+    if (showOverlay) {
+      showOverlay.addEventListener("click", function (e) {
+        if (e.target === showOverlay) showOverlay.setAttribute("hidden", "");
+      });
+    }
+    var reveal = $("newKeyValue");
+    if (reveal) {
+      reveal.addEventListener("click", function () {
+        var t = (reveal.textContent || "").trim();
+        if (!t || t === "-") return;
+        safeCopy(t).then(function () { showToast("已复制"); });
+      });
+    }
   }
 
   /* ---------------------- Logs ---------------------- */
@@ -517,6 +693,7 @@
     loadModels();
     loadLogs(1);
     bindAuthModal();
+    bindKeyControls();
     loadMe();
     setInterval(loadStatus, 30000);
   }

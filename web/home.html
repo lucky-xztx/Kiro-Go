@@ -52,10 +52,10 @@
         <span class="info-label">OpenAI</span>
         <div class="info-value" id="openaiUrl" data-copy>-</div>
       </div>
-      <div class="info-row">
-        <span class="info-label">Models</span>
-        <div class="info-value" id="modelsUrl" data-copy>-</div>
-      </div>
+<!--      <div class="info-row">-->
+<!--        <span class="info-label">Models</span>-->
+<!--        <div class="info-value" id="modelsUrl" data-copy>-</div>-->
+<!--      </div>-->
       <div class="info-row info-row-top">
         <span class="info-label">模型</span>
         <div class="models-list" id="modelsList">
@@ -126,7 +126,7 @@
             </tr>
           </thead>
           <tbody id="logsBody">
-            <tr class="logs-empty"><td colspan="7">请先登录查看调用明细</td></tr>
+            <tr class="logs-empty"><td colspan="7">加载中...</td></tr>
           </tbody>
         </table>
       </div>
@@ -140,6 +140,45 @@
       <span class="dot">·</span>
       <a href="https://github.com/Quorinex/Kiro-Go" target="_blank" rel="noopener">GitHub</a>
     </footer>
+  </div>
+
+  <!-- 新建 Key 弹窗 -->
+  <div class="auth-overlay" id="newKeyOverlay" hidden>
+    <div class="auth-card" role="dialog" aria-modal="true">
+      <div class="auth-tabs">
+        <span class="auth-tab is-active">新建 API Key</span>
+        <button type="button" class="auth-close" id="newKeyClose" aria-label="关闭">×</button>
+      </div>
+      <form id="newKeyForm" class="auth-form" autocomplete="off">
+        <label>
+          <span>名称（可选）</span>
+          <input type="text" name="name" maxlength="64" placeholder="例如 我的客户端" />
+        </label>
+        <label>
+          <span>Token 上限（0 = 不限）</span>
+          <input type="number" name="tokenLimit" min="0" step="1" value="0" />
+        </label>
+        <label>
+          <span>额度上限（0 = 不限）</span>
+          <input type="number" name="creditLimit" min="0" step="0.01" value="0" />
+        </label>
+        <p class="auth-error" id="newKeyError"></p>
+        <button type="submit" class="btn-pill auth-submit" id="newKeySubmit">创建</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 显示新建 Key 弹窗 -->
+  <div class="auth-overlay" id="showKeyOverlay" hidden>
+    <div class="auth-card" role="dialog" aria-modal="true">
+      <div class="auth-tabs">
+        <span class="auth-tab is-active">已创建</span>
+        <button type="button" class="auth-close" id="showKeyClose" aria-label="关闭">×</button>
+      </div>
+      <p class="key-hint">请保存好这把 Key，关闭后将不再完整显示。</p>
+      <div class="key-reveal" id="newKeyValue" data-copy>-</div>
+      <button type="button" class="btn-pill auth-submit" id="showKeyDone">我已保存</button>
+    </div>
   </div>
 
   <!-- 登录 / 注册 弹窗 -->
