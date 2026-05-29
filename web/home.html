@@ -94,6 +94,35 @@
       </div>
     </section>
 
+    <section class="card logs-card" id="logsCard" hidden>
+      <div class="logs-head">
+        <h2>调用明细</h2>
+        <div class="logs-pills">
+          <span class="rate-pill pill-rpm">RPM <strong id="logsRpm">0</strong></span>
+          <span class="rate-pill pill-tpm">TPM <strong id="logsTpm">0</strong></span>
+        </div>
+      </div>
+      <div class="logs-scroll">
+        <table class="logs-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>令牌</th>
+              <th>模型</th>
+              <th>用时</th>
+              <th>输入</th>
+              <th>输出</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody id="logsBody">
+            <tr class="logs-empty"><td colspan="7">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="logsPagination"></div>
+    </section>
+
     <footer class="footer">
       <span>Powered by Kiro-Go</span>
       <span class="dot">·</span>

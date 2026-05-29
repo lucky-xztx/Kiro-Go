@@ -45,7 +45,7 @@ body {
 
 .container {
   width: 100%;
-  max-width: 680px;
+  max-width: 880px;
 }
 
 /* Top bar */
@@ -296,6 +296,199 @@ h1 {
   margin-top: 4px;
 }
 
+/* Logs card */
+.logs-card[hidden] {
+  display: none;
+}
+.logs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.logs-head h2 {
+  margin-bottom: 0;
+}
+.logs-pills {
+  display: inline-flex;
+  gap: 8px;
+}
+.rate-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  color: #4a4a6a;
+}
+.rate-pill strong {
+  font-weight: 700;
+  color: #6d28d9;
+}
+.pill-tpm strong {
+  color: #2563eb;
+}
+.logs-scroll {
+  overflow-x: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  min-width: 640px;
+}
+.logs-table th,
+.logs-table td {
+  padding: 10px 10px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+  color: #2d2d4a;
+  white-space: nowrap;
+}
+.logs-table th {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b6b8a;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: rgba(255, 255, 255, 0.25);
+}
+.logs-table tr:last-child td {
+  border-bottom: none;
+}
+.logs-table tr.logs-row:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+.logs-empty td {
+  text-align: center;
+  color: #7a7a9a;
+  font-style: italic;
+  padding: 24px 10px;
+}
+.model-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(168, 85, 247, 0.15);
+  color: #6d28d9;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+}
+.key-name {
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.8rem;
+  color: #3d3d5c;
+}
+.badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.badge-success {
+  background: rgba(34, 197, 94, 0.18);
+  color: #15803d;
+}
+.badge-error {
+  background: rgba(239, 68, 68, 0.18);
+  color: #b91c1c;
+}
+.badge-latency {
+  font-variant-numeric: tabular-nums;
+  color: #4a4a6a;
+}
+.tokens-cell {
+  font-variant-numeric: tabular-nums;
+}
+.detail-btn {
+  background: transparent;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+  color: #6d28d9;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.detail-btn:hover {
+  background: rgba(168, 85, 247, 0.12);
+}
+.logs-detail-row td {
+  background: rgba(255, 255, 255, 0.35);
+  white-space: normal;
+}
+.logs-detail-row pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(20, 18, 38, 0.85);
+  color: #e0e0f0;
+  border-radius: 8px;
+  font-family: "SF Mono", "Fira Code", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.page-btn {
+  font-family: inherit;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.4);
+  color: #3d3d5c;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.page-btn:hover:not(:disabled):not(.is-current) {
+  background: rgba(255, 255, 255, 0.65);
+  border-color: #a855f7;
+  color: #6d28d9;
+}
+.page-btn.is-current {
+  background: linear-gradient(135deg, #a855f7, #6366f1);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.4);
+  cursor: default;
+}
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.page-ellipsis {
+  color: #6b6b8a;
+  padding: 0 4px;
+}
+
 /* Footer */
 .footer {
   margin-top: 30px;
@@ -485,5 +678,17 @@ h1 {
   }
   .stat-value {
     font-size: 1.2rem;
+  }
+  .logs-table {
+    font-size: 0.78rem;
+  }
+  .logs-table th,
+  .logs-table td {
+    padding: 8px 8px;
+  }
+  .page-btn {
+    min-width: 28px;
+    height: 28px;
+    font-size: 0.75rem;
   }
 }

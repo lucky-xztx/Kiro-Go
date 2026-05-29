@@ -4,6 +4,7 @@
 
   var BASE = window.location.origin;
   var currentUser = null;
+  var logsState = { page: 1, pageSize: 20, total: 0 };
 
   function $(id) {
     return document.getElementById(id);
@@ -226,6 +227,16 @@
       if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
       else entry.setAttribute("hidden", "");
     }
+    var logsCard = $("logsCard");
+    if (logsCard) {
+      if (currentUser) {
+        logsCard.removeAttribute("hidden");
+        logsState.page = 1;
+        loadLogs(1);
+      } else {
+        logsCard.setAttribute("hidden", "");
+      }
+    }
   }
 
   function loadMe() {
@@ -346,6 +357,166 @@
           if (submit) submit.disabled = false;
         });
     });
+  }
+
+  /* ---------------------- Logs ---------------------- */
+
+  function formatTime(ts) {
+    if (!ts) return "-";
+    var d = new Date(ts * 1000);
+    var pad = function (n) { return n < 10 ? "0" + n : "" + n; };
+    return (
+      d.getFullYear() + "/" +
+      pad(d.getMonth() + 1) + "/" +
+      pad(d.getDate()) + " " +
+      pad(d.getHours()) + ":" +
+      pad(d.getMinutes()) + ":" +
+      pad(d.getSeconds())
+    );
+  }
+
+  function formatLatency(ms) {
+    if (ms == null || isNaN(ms)) return "-";
+    ms = Number(ms);
+    if (ms < 1000) return ms + "ms";
+    return (ms / 1000).toFixed(2) + "s";
+  }
+
+  function statusBadge(status, errMsg) {
+    var ok = status >= 200 && status < 300;
+    var cls = ok ? "badge-success" : "badge-error";
+    var label = status > 0 ? String(status) : (errMsg ? "ERR" : "-");
+    return '<span class="badge-status ' + cls + '">' + escapeHTML(label) + '</span>';
+  }
+
+  function loadLogs(page) {
+    var body = $("logsBody");
+    var pager = $("logsPagination");
+    if (!body) return;
+    logsState.page = page || 1;
+    body.innerHTML = '<tr class="logs-empty"><td colspan="7">加载中...</td></tr>';
+    if (pager) pager.innerHTML = "";
+    var url = "/api/me/logs?page=" + logsState.page + "&pageSize=" + logsState.pageSize;
+    api(url)
+      .then(function (data) {
+        logsState.total = data.total || 0;
+        var rpm = $("logsRpm");
+        var tpm = $("logsTpm");
+        if (rpm) rpm.textContent = data.rpm != null ? data.rpm : 0;
+        if (tpm) tpm.textContent = data.tpm != null ? data.tpm : 0;
+        renderLogs(data.logs || []);
+        renderPagination();
+      })
+      .catch(function (e) {
+        body.innerHTML =
+          '<tr class="logs-empty"><td colspan="7">' +
+          escapeHTML(e.message || "加载失败") +
+          '</td></tr>';
+      });
+  }
+
+  function renderLogs(logs) {
+    var body = $("logsBody");
+    if (!body) return;
+    if (!logs.length) {
+      body.innerHTML = '<tr class="logs-empty"><td colspan="7">暂无调用记录</td></tr>';
+      return;
+    }
+    var html = logs.map(function (l, idx) {
+      var keyName = l.apiKeyName || "-";
+      var model = l.model || "-";
+      var detailKey = "log-" + idx;
+      var detail = {
+        id: l.id,
+        path: l.path,
+        provider: l.provider,
+        status: l.status,
+        credits: l.credits,
+        error: l.error,
+        latencyMs: l.latencyMs,
+        inputTokens: l.inputTokens,
+        outputTokens: l.outputTokens,
+      };
+      return (
+        '<tr class="logs-row" data-detail="' + detailKey + '">' +
+          '<td>' + escapeHTML(formatTime(l.createdAt)) + '</td>' +
+          '<td><span class="key-name">' + escapeHTML(keyName) + '</span></td>' +
+          '<td><span class="model-pill">' + escapeHTML(model) + '</span></td>' +
+          '<td><span class="badge-latency">' + escapeHTML(formatLatency(l.latencyMs)) + '</span></td>' +
+          '<td class="tokens-cell">' + formatNumber(l.inputTokens || 0) + '</td>' +
+          '<td class="tokens-cell">' + formatNumber(l.outputTokens || 0) + '</td>' +
+          '<td>' + statusBadge(l.status, l.error) +
+            ' <button type="button" class="detail-btn" data-target="' + detailKey + '">展开</button>' +
+          '</td>' +
+        '</tr>' +
+        '<tr class="logs-detail-row" id="' + detailKey + '" hidden><td colspan="7"><pre>' +
+          escapeHTML(JSON.stringify(detail, null, 2)) +
+        '</pre></td></tr>'
+      );
+    }).join("");
+    body.innerHTML = html;
+    body.querySelectorAll(".detail-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var id = btn.getAttribute("data-target");
+        var row = document.getElementById(id);
+        if (!row) return;
+        if (row.hasAttribute("hidden")) {
+          row.removeAttribute("hidden");
+          btn.textContent = "收起";
+        } else {
+          row.setAttribute("hidden", "");
+          btn.textContent = "展开";
+        }
+      });
+    });
+  }
+
+  function renderPagination() {
+    var pager = $("logsPagination");
+    if (!pager) return;
+    var total = logsState.total;
+    var pageSize = logsState.pageSize;
+    var current = logsState.page;
+    var pages = Math.max(1, Math.ceil(total / pageSize));
+    if (pages <= 1) {
+      pager.innerHTML = "";
+      return;
+    }
+    var parts = [];
+    parts.push(btn("‹", current - 1, current === 1));
+    var pushPage = function (p) {
+      parts.push(
+        '<button type="button" class="page-btn' + (p === current ? " is-current" : "") + '" data-page="' + p + '">' + p + '</button>'
+      );
+    };
+    var pushDots = function () { parts.push('<span class="page-ellipsis">...</span>'); };
+    if (pages <= 7) {
+      for (var i = 1; i <= pages; i++) pushPage(i);
+    } else {
+      pushPage(1);
+      if (current > 4) pushDots();
+      var start = Math.max(2, current - 2);
+      var end = Math.min(pages - 1, current + 2);
+      for (var j = start; j <= end; j++) pushPage(j);
+      if (current < pages - 3) pushDots();
+      pushPage(pages);
+    }
+    parts.push(btn("›", current + 1, current === pages));
+    pager.innerHTML = parts.join("");
+    pager.querySelectorAll(".page-btn").forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (b.disabled || b.classList.contains("is-current")) return;
+        var p = parseInt(b.getAttribute("data-page"), 10);
+        if (!isNaN(p) && p >= 1 && p <= pages) loadLogs(p);
+      });
+    });
+
+    function btn(label, page, disabled) {
+      return (
+        '<button type="button" class="page-btn" data-page="' + page + '"' +
+        (disabled ? " disabled" : "") + '>' + label + '</button>'
+      );
+    }
   }
 
   /* ---------------------- Init ---------------------- */

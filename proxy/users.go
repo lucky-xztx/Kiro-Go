@@ -7,6 +7,7 @@ import (
 	"kiro-go/logger"
 	"kiro-go/store"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -323,6 +324,78 @@ func (h *Handler) apiDeleteMyKey(w http.ResponseWriter, r *http.Request, id stri
 }
 
 // ---------------------- Admin: user management ----------------------
+
+func (h *Handler) apiListMyLogs(w http.ResponseWriter, r *http.Request) {
+	u := h.resolveUser(w, r, true)
+	if u == nil {
+		return
+	}
+	q := r.URL.Query()
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	pageSize, _ := strconv.Atoi(q.Get("pageSize"))
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	filter := store.LogQuery{
+		UserID:   u.ID,
+		ApiKeyID: q.Get("apiKeyId"),
+		Limit:    pageSize,
+		Offset:   (page - 1) * pageSize,
+	}
+	logs, err := store.ListRequestLogs(filter)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	total, err := store.CountRequestLogs(store.LogQuery{UserID: u.ID, ApiKeyID: q.Get("apiKeyId")})
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	now := time.Now().Unix()
+	rpm, _ := store.RequestRate(store.LogQuery{UserID: u.ID}, now-60)
+	tpmStats, _ := store.RequestRate(store.LogQuery{UserID: u.ID}, now-60)
+	keys, _ := store.ListApiKeysForUser(u.ID)
+	keyMap := make(map[string]string, len(keys))
+	for _, k := range keys {
+		keyMap[k.ID] = k.Name
+		if k.Name == "" {
+			keyMap[k.ID] = "未命名"
+		}
+	}
+	enriched := make([]map[string]interface{}, 0, len(logs))
+	for _, l := range logs {
+		enriched = append(enriched, map[string]interface{}{
+			"id":           l.ID,
+			"createdAt":    l.CreatedAt,
+			"apiKeyId":     l.ApiKeyID,
+			"apiKeyName":   keyMap[l.ApiKeyID],
+			"model":        l.Model,
+			"provider":     l.Provider,
+			"status":       l.Status,
+			"inputTokens":  l.InputTokens,
+			"outputTokens": l.OutputTokens,
+			"credits":      l.Credits,
+			"latencyMs":    l.LatencyMs,
+			"error":        l.Error,
+			"path":         l.Path,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"logs":     enriched,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+		"rpm":      rpm.Requests,
+		"tpm":      tpmStats.Tokens,
+	})
+}
 
 func (h *Handler) apiAdminListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := store.ListUsers()
