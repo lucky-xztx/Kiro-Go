@@ -274,3 +274,97 @@ func TestGetNextForModelExcludingSkipsExcludedAccount(t *testing.T) {
 		t.Fatalf("expected account b, got %#v", acc)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Pointer-isolation: getters must return an independent copy, not a pointer
+// into p.accounts. Mutating the returned account (as ensureValidToken does for
+// token refresh) must not race with / corrupt the pool's slice.
+// ---------------------------------------------------------------------------
+
+func TestGetNextReturnsIndependentCopy(t *testing.T) {
+	p := newTestPool(config.Account{ID: "a", AccessToken: "old", Enabled: true})
+
+	got := p.GetNext()
+	if got == nil {
+		t.Fatal("expected an account")
+	}
+	got.AccessToken = "mutated-by-caller"
+
+	// The pool's internal copy must be untouched.
+	p.mu.RLock()
+	internal := p.accounts[0].AccessToken
+	p.mu.RUnlock()
+	if internal != "old" {
+		t.Fatalf("caller mutation leaked into pool slice: got %q, want %q", internal, "old")
+	}
+}
+
+func TestGetByIDReturnsIndependentCopy(t *testing.T) {
+	p := newTestPool(config.Account{ID: "a", AccessToken: "old"})
+
+	got := p.GetByID("a")
+	if got == nil {
+		t.Fatal("expected account a")
+	}
+	got.AccessToken = "mutated"
+
+	p.mu.RLock()
+	internal := p.accounts[0].AccessToken
+	p.mu.RUnlock()
+	if internal != "old" {
+		t.Fatalf("GetByID returned a pointer into the slice: pool now %q", internal)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Reload must not regress fresher in-memory runtime stats with stale config.
+// ---------------------------------------------------------------------------
+
+func TestReloadPreservesInMemoryStats(t *testing.T) {
+	cfgFile := filepath.Join(t.TempDir(), "config.json")
+	if err := config.Init(cfgFile); err != nil {
+		t.Fatalf("config.Init: %v", err)
+	}
+	if err := config.AddAccount(config.Account{ID: "acct", Enabled: true}); err != nil {
+		t.Fatalf("AddAccount: %v", err)
+	}
+
+	p := newTestPool()
+	p.Reload() // pulls the account in from config with zeroed stats
+
+	// Simulate runtime usage accumulating in memory (not yet persisted).
+	p.UpdateStats("acct", 100, 1.5)
+	p.UpdateStats("acct", 50, 0.5)
+
+	// A Reload triggered by some unrelated config change must keep the fresher
+	// in-memory counters, not reset them to the stale persisted (zero) values.
+	p.Reload()
+
+	p.mu.RLock()
+	var found bool
+	var reqs, toks int
+	var creds float64
+	for i := range p.accounts {
+		if p.accounts[i].ID == "acct" {
+			found = true
+			reqs = p.accounts[i].RequestCount
+			toks = p.accounts[i].TotalTokens
+			creds = p.accounts[i].TotalCredits
+			break
+		}
+	}
+	p.mu.RUnlock()
+
+	if !found {
+		t.Fatal("account missing after Reload")
+	}
+	if reqs != 2 {
+		t.Errorf("RequestCount regressed: got %d, want 2", reqs)
+	}
+	if toks != 150 {
+		t.Errorf("TotalTokens regressed: got %d, want 150", toks)
+	}
+	if creds != 2.0 {
+		t.Errorf("TotalCredits regressed: got %v, want 2.0", creds)
+	}
+}

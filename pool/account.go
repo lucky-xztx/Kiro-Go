@@ -12,6 +12,20 @@ import (
 
 const tokenRefreshSkewSeconds int64 = 120
 
+// copyAccount returns an independent copy of a, or nil when a is nil.
+// Account holds only value-type fields, so a shallow copy fully decouples the
+// returned value from the pool's lock-protected slice. Callers (e.g. the proxy
+// handler's ensureValidToken) mutate the returned account's token fields
+// lock-free; returning a copy prevents that from racing with UpdateToken /
+// UpdateStats / Reload, which mutate p.accounts under p.mu.
+func copyAccount(a *config.Account) *config.Account {
+	if a == nil {
+		return nil
+	}
+	out := *a
+	return &out
+}
+
 // AccountPool 账号池
 type AccountPool struct {
 	mu            sync.RWMutex
@@ -21,6 +35,14 @@ type AccountPool struct {
 	cooldowns     map[string]time.Time       // 账号冷却时间
 	errorCounts   map[string]int             // 连续错误计数
 	modelLists    map[string]map[string]bool // accountID → set of modelIDs (from ListAvailableModels)
+
+	// statsDirty tracks account IDs whose in-memory runtime stats changed and
+	// still need to be persisted to config.json. A single coalescing flusher
+	// (statsFlushLoop) drains this set on an interval, so a burst of requests
+	// against one account produces at most one file write per tick instead of
+	// one goroutine + full-file rewrite per request.
+	statsDirty     map[string]bool
+	statsFlushOnce sync.Once
 }
 
 var (
@@ -35,8 +57,10 @@ func GetPool() *AccountPool {
 			cooldowns:   make(map[string]time.Time),
 			errorCounts: make(map[string]int),
 			modelLists:  make(map[string]map[string]bool),
+			statsDirty:  make(map[string]bool),
 		}
 		pool.Reload()
+		pool.startStatsFlusher()
 	})
 	return pool
 }
@@ -44,14 +68,58 @@ func GetPool() *AccountPool {
 // Reload 从配置重新加载账号
 // 构建加权列表：weight<=1 出现 1 次，weight>=2 出现 weight 次。
 // 额度耗尽的账号是否参与调度由上游 OverageStatus 决定（DISABLED → 跳过）。
+//
+// 运行时统计（RequestCount/ErrorCount/TotalTokens/TotalCredits/LastUsed）只在内存中
+// 增量累加、异步落盘，config 里可能滞后。Reload 从 config 重建账号列表时，会用内存中
+// 的最新统计覆盖，避免把尚未持久化的计数回退（否则高频请求下统计会“倒退”）。
 func (p *AccountPool) Reload() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	// 快照当前内存里的运行时统计，按账号 ID 去重（加权列表里同 ID 会重复）。
+	type runtimeStats struct {
+		requestCount, errorCount, totalTokens int
+		totalCredits                          float64
+		lastUsed                              int64
+	}
+	prev := make(map[string]runtimeStats, len(p.accounts))
+	for i := range p.accounts {
+		a := &p.accounts[i]
+		if _, ok := prev[a.ID]; ok {
+			continue
+		}
+		prev[a.ID] = runtimeStats{
+			requestCount: a.RequestCount,
+			errorCount:   a.ErrorCount,
+			totalTokens:  a.TotalTokens,
+			totalCredits: a.TotalCredits,
+			lastUsed:     a.LastUsed,
+		}
+	}
+
 	enabled := config.GetEnabledAccounts()
 	var weighted []config.Account
 	for _, a := range enabled {
 		if isOverUsageLimit(a) && !isUpstreamOverageEnabled(a) {
 			continue
+		}
+		// 内存统计若比 config 新则覆盖（内存只增不减，等于或大于持久化值）。
+		if s, ok := prev[a.ID]; ok {
+			if s.requestCount > a.RequestCount {
+				a.RequestCount = s.requestCount
+			}
+			if s.errorCount > a.ErrorCount {
+				a.ErrorCount = s.errorCount
+			}
+			if s.totalTokens > a.TotalTokens {
+				a.TotalTokens = s.totalTokens
+			}
+			if s.totalCredits > a.TotalCredits {
+				a.TotalCredits = s.totalCredits
+			}
+			if s.lastUsed > a.LastUsed {
+				a.LastUsed = s.lastUsed
+			}
 		}
 		w := effectiveWeight(a.Weight)
 		for j := 0; j < w; j++ {
@@ -112,7 +180,7 @@ func (p *AccountPool) GetNextExcluding(excluded map[string]bool) *config.Account
 			continue
 		}
 
-		return acc
+		return copyAccount(acc)
 	}
 
 	// 无可用账号，返回冷却时间最短的（排除额度用尽的，除非允许超额）
@@ -133,10 +201,10 @@ func (p *AccountPool) GetNextExcluding(excluded map[string]bool) *config.Account
 				earliest = cooldown
 			}
 		} else {
-			return acc
+			return copyAccount(acc)
 		}
 	}
-	return best
+	return copyAccount(best)
 }
 
 // SetModelList 缓存账号支持的模型集合（由 handler 在刷新后调用）
@@ -224,7 +292,7 @@ func (p *AccountPool) GetNextForModelExcluding(model string, excluded map[string
 			seen[acc.ID] = true
 			continue
 		}
-		return acc
+		return copyAccount(acc)
 	}
 
 	// fallback：找冷却时间最短且支持该模型的账号
@@ -247,19 +315,19 @@ func (p *AccountPool) GetNextForModelExcluding(model string, excluded map[string
 				earliest = cooldown
 			}
 		} else {
-			return acc
+			return copyAccount(acc)
 		}
 	}
-	return best
+	return copyAccount(best)
 }
 
-// GetByID 根据 ID 获取账号
+// GetByID 根据 ID 获取账号（返回独立拷贝，避免内部指针逃逸出锁）
 func (p *AccountPool) GetByID(id string) *config.Account {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	for i := range p.accounts {
 		if p.accounts[i].ID == id {
-			return &p.accounts[i]
+			return copyAccount(&p.accounts[i])
 		}
 	}
 	return nil
@@ -461,7 +529,66 @@ func (p *AccountPool) UpdateStats(id string, tokens int, credits float64) {
 		}
 	}
 	if updated {
-		go config.UpdateAccountStats(id, requestCount, errorCount, totalTokens, totalCredits, lastUsed)
+		// 标记为脏，由 statsFlushLoop 合并落盘，避免每个请求都起 goroutine + 全量重写文件。
+		if p.statsDirty == nil {
+			p.statsDirty = make(map[string]bool)
+		}
+		p.statsDirty[id] = true
+	}
+}
+
+// startStatsFlusher 启动唯一的统计落盘协程（GetPool 时调用一次）。
+func (p *AccountPool) startStatsFlusher() {
+	p.statsFlushOnce.Do(func() {
+		go p.statsFlushLoop(5 * time.Second)
+	})
+}
+
+// statsFlushLoop 周期性把脏账号的运行时统计落盘到 config.json。
+// 一次 tick 内对每个脏账号只写一次（取内存中的最新累加值），把高频请求下
+// “每请求一个 goroutine + 全量写文件 + 乱序覆盖” 的问题收敛成定时合并写。
+func (p *AccountPool) statsFlushLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		p.FlushStats()
+	}
+}
+
+// FlushStats 立即把当前所有脏账号的运行时统计落盘。可被退出钩子复用。
+func (p *AccountPool) FlushStats() {
+	// 在锁内取出脏 ID 与最新统计快照，锁外写文件，避免持锁做磁盘 IO。
+	type snap struct {
+		requestCount, errorCount, totalTokens int
+		totalCredits                          float64
+		lastUsed                              int64
+	}
+	p.mu.Lock()
+	if len(p.statsDirty) == 0 {
+		p.mu.Unlock()
+		return
+	}
+	pending := make(map[string]snap, len(p.statsDirty))
+	for id := range p.statsDirty {
+		for i := range p.accounts {
+			if p.accounts[i].ID == id {
+				a := &p.accounts[i]
+				pending[id] = snap{
+					requestCount: a.RequestCount,
+					errorCount:   a.ErrorCount,
+					totalTokens:  a.TotalTokens,
+					totalCredits: a.TotalCredits,
+					lastUsed:     a.LastUsed,
+				}
+				break
+			}
+		}
+	}
+	p.statsDirty = make(map[string]bool)
+	p.mu.Unlock()
+
+	for id, s := range pending {
+		_ = config.UpdateAccountStats(id, s.requestCount, s.errorCount, s.totalTokens, s.totalCredits, s.lastUsed)
 	}
 }
 

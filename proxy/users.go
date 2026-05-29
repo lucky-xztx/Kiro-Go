@@ -38,7 +38,7 @@ func (h *Handler) resolveUser(w http.ResponseWriter, r *http.Request, authRequir
 			pw = c.Value
 		}
 	}
-	if pw != "" && pw == config.GetPassword() {
+	if pw != "" && store.ConstantTimeEqual(pw, config.GetPassword()) {
 		if u, err := store.GetUserByUsername("admin"); err == nil {
 			return u
 		}
@@ -77,7 +77,7 @@ func (h *Handler) adminAuthorized(r *http.Request) bool {
 			pw = c.Value
 		}
 	}
-	if pw != "" && pw == config.GetPassword() {
+	if pw != "" && store.ConstantTimeEqual(pw, config.GetPassword()) {
 		return true
 	}
 	return false

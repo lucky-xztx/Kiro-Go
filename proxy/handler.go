@@ -23,6 +23,11 @@ import (
 
 const tokenRefreshSkewSeconds int64 = 120
 
+// maxRequestBodyBytes caps the size of any incoming request body. It is generous
+// enough for legitimate Claude/OpenAI payloads (including base64-encoded images)
+// while preventing an unbounded body from exhausting server memory.
+const maxRequestBodyBytes int64 = 100 << 20 // 100 MiB
+
 // Handler HTTP 处理器
 type Handler struct {
 	pool *pool.AccountPool
@@ -378,6 +383,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(204)
 		return
+	}
+
+	// 限制请求体大小，防止超大 body 耗尽内存（ReadTimeout 只限时不限量）。
+	// 100MB 远高于任何正常的 Claude/OpenAI 请求（含 base64 图片），同时挡住恶意大流。
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	}
 
 	// 路由
@@ -1356,6 +1367,26 @@ func (h *Handler) saveStats() {
 		int(atomic.LoadInt64(&h.totalTokens)),
 		h.getCredits(),
 	)
+}
+
+// Shutdown stops background loops and flushes any pending statistics to disk.
+// Safe to call once during graceful shutdown; persists both the global counters
+// and the pool's per-account runtime stats that the coalescing flusher batches.
+func (h *Handler) Shutdown() {
+	// Stop background loops if still running (idempotent via non-blocking close).
+	select {
+	case <-h.stopRefresh:
+	default:
+		close(h.stopRefresh)
+	}
+	select {
+	case <-h.stopStatsSaver:
+	default:
+		close(h.stopStatsSaver)
+	}
+	// Final persistence so we don't drop the last interval's worth of stats.
+	h.saveStats()
+	h.pool.FlushStats()
 }
 
 // getCredits 线程安全获取 credits
@@ -3055,11 +3086,11 @@ func (h *Handler) apiGetStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"accounts":        h.pool.Count(),
 		"available":       h.pool.AvailableCount(),
-		"totalRequests":   h.totalRequests,
-		"successRequests": h.successRequests,
-		"failedRequests":  h.failedRequests,
-		"totalTokens":     h.totalTokens,
-		"totalCredits":    h.totalCredits,
+		"totalRequests":   atomic.LoadInt64(&h.totalRequests),
+		"successRequests": atomic.LoadInt64(&h.successRequests),
+		"failedRequests":  atomic.LoadInt64(&h.failedRequests),
+		"totalTokens":     atomic.LoadInt64(&h.totalTokens),
+		"totalCredits":    h.getCredits(),
 		"uptime":          time.Now().Unix() - h.startTime,
 	})
 }
