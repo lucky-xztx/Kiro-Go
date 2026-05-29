@@ -800,6 +800,31 @@
     const label = map[id] || id;
     return '<span class="badge badge-provider provider-' + escapeAttr(id) + '">' + escapeHtml(label) + '</span>';
   }
+
+  // Codex（ChatGPT）账号没有 credit 配额，只有两个滚动用量窗口（百分比）：
+  // 主窗口 ≈ 5 小时，次窗口 ≈ 7 天。这里渲染两条百分比进度条。
+  function codexResetText(resetAt) {
+    if (!resetAt) return '';
+    const diff = resetAt - Math.floor(Date.now() / 1000);
+    if (diff <= 0) return '已重置';
+    if (diff < 3600) return Math.floor(diff / 60) + '分钟后重置';
+    if (diff < 86400) return Math.floor(diff / 3600) + '小时后重置';
+    return Math.floor(diff / 86400) + '天后重置';
+  }
+  function codexWindowBar(label, pct, resetAt) {
+    const p = Math.max(0, Math.min(100, pct || 0));
+    const cls = p > 90 ? 'critical' : p > 70 ? 'high' : '';
+    const reset = codexResetText(resetAt);
+    return '<div class="account-usage">' +
+      '<div class="usage-label">' + escapeHtml(label) + (reset ? ' <span class="muted-line">· ' + escapeHtml(reset) + '</span>' : '') + '</div>' +
+      '<div class="usage-bar"><div class="usage-fill ' + cls + '" data-usage-pct="' + escapeAttr(p) + '"></div></div>' +
+      '<div class="usage-text"><span></span><span>' + p.toFixed(1) + '%</span></div>' +
+      '</div>';
+  }
+  function renderCodexUsage(a) {
+    return codexWindowBar('5 小时用量', a.codexPrimaryPercent, a.codexPrimaryResetAt) +
+      codexWindowBar('周用量（7 天）', a.codexSecondaryPercent, a.codexSecondaryResetAt);
+  }
   function getStatusBadge(a) {
     const out = [];
     const isBanned = a.banStatus && a.banStatus !== 'ACTIVE';
@@ -854,6 +879,7 @@
       const trialPct = (a.trialUsagePercent || 0) * 100;
       const trialClass = trialPct > 90 ? 'critical' : trialPct > 70 ? 'high' : '';
       const isSelected = selectedAccounts.has(a.id);
+      const isCodex = (a.upstream || '').toLowerCase() === 'codex';
       const weight = a.weight || 0;
       const weightBadge = weight >= 2 ? '<span class="badge badge-warning">' + escapeHtml(t('accounts.weightShort')) + ':' + weight + '</span>' : '';
       const overageBadge = renderOverageBadge(a);
@@ -898,13 +924,15 @@
         '<button class="btn btn-sm btn-danger" data-action="delete" data-id="' + idAttr + '">' + escapeHtml(t('accounts.delete')) + '</button>' +
         '</div>' +
         '</div>' +
-        (a.usageLimit > 0 ?
-          '<div class="account-usage">' +
-          '<div class="usage-label">' + escapeHtml(t('accounts.mainQuota')) + '</div>' +
-          '<div class="usage-bar"><div class="usage-fill ' + usageClass + '" data-usage-pct="' + escapeAttr(usagePct) + '"></div></div>' +
-          '<div class="usage-text"><span>' + (a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0) + '</span><span>' + usagePct.toFixed(1) + '%</span></div>' +
-          '</div>' : '') +
-        (a.trialUsageLimit > 0 ?
+        (isCodex
+          ? renderCodexUsage(a)
+          : (a.usageLimit > 0 ?
+            '<div class="account-usage">' +
+            '<div class="usage-label">' + escapeHtml(t('accounts.mainQuota')) + '</div>' +
+            '<div class="usage-bar"><div class="usage-fill ' + usageClass + '" data-usage-pct="' + escapeAttr(usagePct) + '"></div></div>' +
+            '<div class="usage-text"><span>' + (a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0) + '</span><span>' + usagePct.toFixed(1) + '%</span></div>' +
+            '</div>' : '')) +
+        (!isCodex && a.trialUsageLimit > 0 ?
           '<div class="account-usage">' +
           '<div class="usage-label">' + escapeHtml(t('accounts.trialQuota')) + ' ' + escapeHtml(formatTrialExpiry(a.trialExpiresAt)) + '</div>' +
           '<div class="usage-bar"><div class="usage-fill ' + trialClass + '" data-usage-pct="' + escapeAttr(trialPct) + '"></div></div>' +
@@ -1117,12 +1145,18 @@
       '<div class="detail-section"><h4>' + escapeHtml(t('detail.subscription')) + '</h4><div class="detail-grid">' +
       detailItem(t('detail.subscriptionType'), a.subscriptionTitle || (a.subscriptionType ? formatSubscriptionLabel(a.subscriptionType) : '-')) +
       detailItem(t('detail.tokenExpiry'), a.expiresAt ? new Date(a.expiresAt * 1000).toLocaleString() : '-') +
-      detailItem(isCodex ? '5h 用量' : t('detail.mainQuota'),
-        isCodex
-          ? ((a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + '%')
-          : ((a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0))) +
-      detailItem(t('detail.resetDate'), a.nextResetDate || '-') +
-      (a.trialUsageLimit > 0 ?
+      (isCodex
+        ? (
+          detailItem('5 小时用量', (a.codexPrimaryPercent != null ? a.codexPrimaryPercent.toFixed(1) : 0) + '%') +
+          detailItem('5 小时重置', a.codexPrimaryResetAt ? new Date(a.codexPrimaryResetAt * 1000).toLocaleString() : '-') +
+          detailItem('周用量（7 天）', (a.codexSecondaryPercent != null ? a.codexSecondaryPercent.toFixed(1) : 0) + '%') +
+          detailItem('周重置', a.codexSecondaryResetAt ? new Date(a.codexSecondaryResetAt * 1000).toLocaleString() : '-')
+        )
+        : (
+          detailItem(t('detail.mainQuota'), (a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0)) +
+          detailItem(t('detail.resetDate'), a.nextResetDate || '-')
+        )) +
+      (!isCodex && a.trialUsageLimit > 0 ?
         detailItem(t('detail.trialQuota'), (a.trialUsageCurrent != null ? a.trialUsageCurrent.toFixed(1) : 0) + ' / ' + a.trialUsageLimit.toFixed(0)) +
         detailItem(t('detail.trialStatus'), a.trialStatus || '-') +
         detailItem(t('detail.trialExpiry'), a.trialExpiresAt ? new Date(a.trialExpiresAt * 1000).toLocaleString() : '-')
