@@ -3151,6 +3151,7 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 			[]codex.OpenAIChatMessage{{Role: "user", Content: "say ok"}},
 			model, false, nil, "medium",
 		)
+		codexReq.Instructions = "You are a helpful assistant. Reply briefly."
 		var content string
 		cb := &codex.StreamCallback{
 			OnEvent: func(eventType string, data json.RawMessage) {
