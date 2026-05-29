@@ -2309,10 +2309,6 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 		h.apiAdminDeleteAlias(w, r, strings.TrimPrefix(path, "/aliases/"))
 	case path == "/providers" && r.Method == "GET":
 		h.apiAdminListProviders(w, r)
-	case path == "/health" && r.Method == "GET":
-		h.apiAdminListHealth(w, r)
-	case path == "/health/check" && r.Method == "POST":
-		h.apiAdminRunHealthCheck(w, r)
 	default:
 		w.WriteHeader(404)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Not Found"})

@@ -99,25 +99,11 @@ func (h *Handler) apiAdminListProviders(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"providers": providers.All()})
 }
 
-// ----- Account health -----
-
-func (h *Handler) apiAdminListHealth(w http.ResponseWriter, r *http.Request) {
-	rows, err := store.ListAccountHealth()
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"health": rows})
-}
-
-// apiAdminRunHealthCheck triggers an on-demand sweep over the configured Kiro
-// accounts. It uses the existing ensureValidToken path as the probe — if the
-// account's refresh token still works, we mark it healthy; otherwise we bump
-// fail_streak and (after 3 in a row) auto-disable.
-func (h *Handler) apiAdminRunHealthCheck(w http.ResponseWriter, r *http.Request) {
-	go h.runHealthCheckOnce("manual")
-	writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "started": true})
-}
+// ----- Account health (background probe only) -----
+//
+// The admin-facing health *display* (list + manual run) was removed along with
+// the health tab. The background probe below still runs on a timer and powers
+// automatic failover (degraded -> failing -> auto-disable), so it stays.
 
 const healthAutoDisableStreak = 3
 

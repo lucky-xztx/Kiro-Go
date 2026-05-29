@@ -112,6 +112,10 @@
         </div>
         <nav class="sidebar-nav" aria-label="" data-i18n-aria-label="aria.sections">
           <div class="tabs" id="tabBar">
+            <button type="button" class="tab" data-tab="dashboard" data-admin-only>
+              <i class="fa-solid fa-chart-line tab-icon"></i>
+              <span data-i18n="tabs.dashboard"></span>
+            </button>
             <button type="button" class="tab active" data-tab="accounts">
               <i class="fa-solid fa-users tab-icon"></i>
               <span data-i18n="tabs.accounts"></span>
@@ -127,10 +131,6 @@
             <button type="button" class="tab" data-tab="aliases" data-admin-only>
               <i class="fa-solid fa-tags tab-icon"></i>
               <span data-i18n="tabs.aliases"></span>
-            </button>
-            <button type="button" class="tab" data-tab="health" data-admin-only>
-              <i class="fa-solid fa-heart-pulse tab-icon"></i>
-              <span data-i18n="tabs.health"></span>
             </button>
             <button type="button" class="tab" data-tab="settings">
               <i class="fa-solid fa-sliders tab-icon"></i>
@@ -596,18 +596,74 @@
         </div>
       </div>
 
-      <!-- Health tab -->
-      <div id="tabHealth" class="tab-content hidden">
-        <div class="card">
-          <div class="card-header">
-            <span class="card-title" data-i18n="health.title"></span>
-            <div class="card-actions">
-              <button class="btn btn-outline btn-sm" id="refreshHealthBtn"><i class="fa-solid fa-arrows-rotate"></i><span class="btn-text" data-i18n="common.refresh"></span></button>
-              <button class="btn btn-primary btn-sm" id="runHealthCheckBtn"><i class="fa-solid fa-stethoscope"></i><span class="btn-text" data-i18n="health.runNow"></span></button>
+      <!-- Dashboard tab (admin only) -->
+      <div id="tabDashboard" class="tab-content hidden">
+        <div class="dash-wrap">
+          <!-- Hero metrics -->
+          <div class="dash-hero-grid">
+            <div class="dash-hero">
+              <div class="dash-hero-top">
+                <span class="dash-hero-label" data-i18n="dashboard.totalRequests"></span>
+                <i class="fa-solid fa-route dash-hero-ico"></i>
+              </div>
+              <div class="dash-hero-value" id="dashTotalRequests">0</div>
+              <div class="dash-hero-foot"><span class="dash-hero-foot-k" data-i18n="dashboard.uptime"></span> <span id="dashUptime">-</span></div>
+            </div>
+            <div class="dash-hero dash-hero--ok">
+              <div class="dash-hero-top">
+                <span class="dash-hero-label" data-i18n="dashboard.successRate"></span>
+                <i class="fa-solid fa-circle-check dash-hero-ico"></i>
+              </div>
+              <div class="dash-hero-value"><span id="dashSuccessRate">0</span><span class="dash-hero-unit">%</span></div>
+              <div class="dash-hero-foot"><span id="dashSuccessCount">0</span> / <span id="dashRequestsTotal2">0</span></div>
+            </div>
+            <div class="dash-hero dash-hero--accent">
+              <div class="dash-hero-top">
+                <span class="dash-hero-label" data-i18n="dashboard.totalTokens"></span>
+                <i class="fa-solid fa-coins dash-hero-ico"></i>
+              </div>
+              <div class="dash-hero-value" id="dashTotalTokens">0</div>
+              <div class="dash-hero-foot"><span class="dash-hero-foot-k" data-i18n="dashboard.totalCredits"></span> <span id="dashTotalCredits">0</span></div>
+            </div>
+            <div class="dash-hero dash-hero--cap">
+              <div class="dash-hero-top">
+                <span class="dash-hero-label" data-i18n="dashboard.availableAccounts"></span>
+                <i class="fa-solid fa-server dash-hero-ico"></i>
+              </div>
+              <div class="dash-hero-value"><span id="dashAvailable">0</span><span class="dash-hero-unit">/<span id="dashAccountsTotal">0</span></span></div>
+              <div class="dash-hero-foot"><span class="dash-hero-foot-k" data-i18n="dashboard.capacityRate"></span> <span id="dashCapacityRate">0</span>%</div>
             </div>
           </div>
-          <small data-i18n="health.hint"></small>
-          <div class="health-list" id="healthList"></div>
+
+          <!-- Charts row -->
+          <div class="dash-panels">
+            <div class="card dash-panel">
+              <div class="card-header"><span class="card-title" data-i18n="dashboard.requestSplit"></span></div>
+              <div class="dash-donut-row">
+                <div class="dash-donut" id="dashReqDonut" style="--ok-pct:0">
+                  <div class="dash-donut-hole">
+                    <span class="dash-donut-num" id="dashDonutRate">0%</span>
+                    <span class="dash-donut-cap" data-i18n="dashboard.success"></span>
+                  </div>
+                </div>
+                <ul class="dash-legend">
+                  <li><span class="dash-dot dash-dot--ok"></span><span data-i18n="dashboard.success"></span><b id="dashLegendSuccess">0</b></li>
+                  <li><span class="dash-dot dash-dot--fail"></span><span data-i18n="dashboard.failed"></span><b id="dashLegendFailed">0</b></li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="card dash-panel">
+              <div class="card-header"><span class="card-title" data-i18n="dashboard.accountStatus"></span></div>
+              <div class="dash-stack" id="dashAccountStack"></div>
+              <ul class="dash-legend dash-legend--row" id="dashAccountLegend"></ul>
+            </div>
+
+            <div class="card dash-panel">
+              <div class="card-header"><span class="card-title" data-i18n="dashboard.providerSplit"></span></div>
+              <div class="dash-bars" id="dashProviderBars"></div>
+            </div>
+          </div>
         </div>
       </div>
         </div>

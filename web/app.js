@@ -36,6 +36,10 @@
   // DOM helpers
   const $ = (id) => document.getElementById(id);
   const qsa = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  function setText(id, val) {
+    const el = $(id);
+    if (el) el.textContent = val == null ? '' : String(val);
+  }
   function escapeHtml(s) {
     const d = document.createElement('div');
     d.textContent = s == null ? '' : String(s);
@@ -3232,49 +3236,122 @@
     } catch (e) { toast((e && e.message) || 'error', 'error'); }
   }
 
-  // ---------- Health tab ----------
-  async function loadHealth() {
-    const wrap = $('healthList');
-    if (!wrap) return;
-    wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('common.loading')) + '</div>';
-    try {
-      const res = await api('/health');
-      const d = await res.json().catch(() => ({}));
-      const list = (d && d.health) || [];
-      if (!list.length) { wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('health.empty')) + '</div>'; return; }
-      wrap.innerHTML = list.map(h => {
-        const cls = 'health-' + (h.status || 'ok');
-        const statusLabel = h.status ? t('health.status.' + h.status) : '-';
-        return '<div class="health-row ' + cls + '">' +
-          '<span class="health-dot" aria-hidden="true"></span>' +
-          '<span class="health-acct">' + escapeHtml(h.accountId || '-') + '</span>' +
-          '<span class="health-status">' + escapeHtml(statusLabel) + '</span>' +
-          '<span class="health-streak">' + escapeHtml(t('health.failStreak')) + ': ' + (h.failStreak || 0) + '</span>' +
-          '<span class="health-time">' + escapeHtml(t('health.lastCheck')) + ': ' + formatLogTime(h.lastCheckAt) + '</span>' +
-          (h.autoDisabled ? '<span class="health-pill danger">' + escapeHtml(t('health.autoDisabled')) + '</span>' : '') +
-          (h.lastError ? '<span class="health-err">' + escapeHtml(h.lastError) + '</span>' : '') +
-          '</div>';
-      }).join('');
-    } catch (e) {
-      wrap.innerHTML = '<div class="muted-line">' + escapeHtml((e && e.message) || 'error') + '</div>';
-    }
+  // ---------- Dashboard tab ----------
+  function fmtUptime(secs) {
+    secs = Number(secs) || 0;
+    const d = Math.floor(secs / 86400);
+    const h = Math.floor((secs % 86400) / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + m + 'm';
+    return m + 'm';
   }
-  async function runHealthCheck() {
+
+  async function loadDashboard() {
+    let status = {};
     try {
-      const res = await api('/health/check', { method: 'POST' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      toast(t('health.started'), 'success');
-      setTimeout(loadHealth, 1500);
-    } catch (e) { toast((e && e.message) || 'error', 'error'); }
+      const res = await api('/status');
+      status = await res.json().catch(() => ({}));
+    } catch (e) { status = {}; }
+
+    const total = Number(status.totalRequests) || 0;
+    const success = Number(status.successRequests) || 0;
+    const failed = Number(status.failedRequests) || 0;
+    const tokens = Number(status.totalTokens) || 0;
+    const credits = Number(status.totalCredits) || 0;
+    const accounts = Number(status.accounts) || 0;
+    const available = Number(status.available) || 0;
+    const denom = success + failed;
+    const successRate = denom > 0 ? Math.round((success / denom) * 100) : 0;
+    const capacityRate = accounts > 0 ? Math.round((available / accounts) * 100) : 0;
+
+    setText('dashTotalRequests', formatNum(total));
+    setText('dashUptime', fmtUptime(status.uptime));
+    setText('dashSuccessRate', successRate);
+    setText('dashSuccessCount', formatNum(success));
+    setText('dashRequestsTotal2', formatNum(denom));
+    setText('dashTotalTokens', formatNum(tokens));
+    setText('dashTotalCredits', credits.toFixed(1));
+    setText('dashAvailable', available);
+    setText('dashAccountsTotal', accounts);
+    setText('dashCapacityRate', capacityRate);
+
+    // Request split donut
+    const donut = $('dashReqDonut');
+    if (donut) donut.style.setProperty('--ok-pct', String(successRate));
+    setText('dashDonutRate', successRate + '%');
+    setText('dashLegendSuccess', formatNum(success));
+    setText('dashLegendFailed', formatNum(failed));
+
+    renderAccountStatusChart();
+    renderProviderChart();
+  }
+
+  function accountStatusBuckets() {
+    const buckets = { active: 0, disabled: 0, banned: 0 };
+    (accountsData || []).forEach(a => {
+      const banned = a.banStatus && a.banStatus !== 'ACTIVE';
+      if (banned) buckets.banned++;
+      else if (a.enabled) buckets.active++;
+      else buckets.disabled++;
+    });
+    return buckets;
+  }
+
+  function renderAccountStatusChart() {
+    const stack = $('dashAccountStack');
+    const legend = $('dashAccountLegend');
+    if (!stack || !legend) return;
+    const b = accountStatusBuckets();
+    const total = b.active + b.disabled + b.banned;
+    const segs = [
+      { key: 'active', cls: 'seg--ok', label: t('dashboard.statusActive'), n: b.active },
+      { key: 'disabled', cls: 'seg--mute', label: t('dashboard.statusDisabled'), n: b.disabled },
+      { key: 'banned', cls: 'seg--fail', label: t('dashboard.statusBanned'), n: b.banned },
+    ];
+    if (total === 0) {
+      stack.innerHTML = '<div class="dash-stack-seg seg--mute" style="width:100%"></div>';
+    } else {
+      stack.innerHTML = segs.filter(s => s.n > 0).map(s =>
+        '<div class="dash-stack-seg ' + s.cls + '" style="width:' + ((s.n / total) * 100) + '%" title="' +
+        escapeHtml(s.label) + ': ' + s.n + '"></div>'
+      ).join('');
+    }
+    legend.innerHTML = segs.map(s =>
+      '<li><span class="dash-dot dash-dot--' + s.key + '"></span>' + escapeHtml(s.label) + '<b>' + s.n + '</b></li>'
+    ).join('');
+  }
+
+  function renderProviderChart() {
+    const wrap = $('dashProviderBars');
+    if (!wrap) return;
+    const counts = {};
+    (accountsData || []).forEach(a => {
+      const p = (a.upstream || a.provider || 'kiro').toLowerCase();
+      counts[p] = (counts[p] || 0) + 1;
+    });
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    if (!entries.length) {
+      wrap.innerHTML = '<div class="muted-line">' + escapeHtml(t('dashboard.noAccounts')) + '</div>';
+      return;
+    }
+    const max = Math.max.apply(null, entries.map(e => e[1]));
+    wrap.innerHTML = entries.map(([name, n]) =>
+      '<div class="dash-bar-row">' +
+      '<span class="dash-bar-name">' + escapeHtml(name) + '</span>' +
+      '<span class="dash-bar-track"><span class="dash-bar-fill" style="width:' + ((n / max) * 100) + '%"></span></span>' +
+      '<span class="dash-bar-val">' + n + '</span>' +
+      '</div>'
+    ).join('');
   }
 
   // Tabs
   const TAB_TITLE_KEYS = {
+    dashboard: 'tabs.dashboard',
     accounts: 'tabs.accounts',
     users: 'tabs.users',
     logs: 'tabs.logs',
     aliases: 'tabs.aliases',
-    health: 'tabs.health',
     settings: 'tabs.settings',
     api: 'tabs.api',
   };
@@ -3293,10 +3370,10 @@
     }
     const sidebar = $('appSidebar');
     if (sidebar) sidebar.classList.remove('is-open');
-    if (tab === 'users') loadUsers();
+    if (tab === 'dashboard') loadDashboard();
+    else if (tab === 'users') loadUsers();
     else if (tab === 'logs') { loadLogs(); loadUsageSeries(); }
     else if (tab === 'aliases') loadAliases();
-    else if (tab === 'health') loadHealth();
   }
 
   // Event wiring
@@ -3552,12 +3629,6 @@
       const btn = e.target.closest('[data-alias-del]');
       if (btn) deleteAlias(btn.dataset.aliasDel);
     });
-
-    // Health tab
-    const refreshHealth = $('refreshHealthBtn');
-    if (refreshHealth) refreshHealth.addEventListener('click', loadHealth);
-    const runHealth = $('runHealthCheckBtn');
-    if (runHealth) runHealth.addEventListener('click', runHealthCheck);
   }
 
   // Init
@@ -3574,7 +3645,10 @@
     wireEvents();
     tryAutoLogin();
     setInterval(() => {
-      if (!$('mainPage').classList.contains('hidden')) loadStats();
+      if ($('mainPage').classList.contains('hidden')) return;
+      loadStats();
+      const dash = $('tabDashboard');
+      if (dash && !dash.classList.contains('hidden')) loadDashboard();
     }, 10000);
   }
 
