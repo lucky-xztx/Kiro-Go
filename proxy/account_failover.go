@@ -45,6 +45,19 @@ func isAuthErrorMessage(msg string) bool {
 		strings.Contains(msg, "refresh token expired")
 }
 
+// isReauthRequiredMessage reports whether the error means the account's
+// credentials are permanently dead and re-authentication (re-import) is the only
+// fix. For Codex this is the single-use refresh_token getting reused/revoked: once
+// another client rotates the refresh_token, ours is gone for good and no amount of
+// retrying recovers it. Distinct from isAuthErrorMessage, which also matches
+// transient/recoverable 401s on a stale access_token.
+func isReauthRequiredMessage(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "reused") ||
+		strings.Contains(msg, "revoked") ||
+		strings.Contains(msg, "invalid_grant")
+}
+
 func (h *Handler) disableAccount(account *config.Account, banStatus, banReason string) {
 	if account == nil {
 		return

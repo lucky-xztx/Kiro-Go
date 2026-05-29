@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"kiro-go/config"
 	"kiro-go/logger"
+	"kiro-go/pool"
 	"kiro-go/providers"
 	"kiro-go/providers/codex"
 	"net/http"
@@ -107,21 +108,42 @@ func (h *Handler) getNextCodexAccount(excluded map[string]bool) *config.Account 
 }
 
 // ensureCodexToken ensures the Codex account has a valid access token.
-// It refreshes via the ChatGPT OAuth flow if needed.
+// It refreshes via the ChatGPT OAuth flow if the locally tracked token is near
+// expiry.
 func (h *Handler) ensureCodexToken(account *config.Account) error {
-	if account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds {
+	return h.refreshCodexToken(account, false)
+}
+
+// forceRefreshCodexToken refreshes the Codex access token unconditionally. Used
+// to recover from upstream token revocation/rotation: ChatGPT can invalidate an
+// access token before its locally tracked expiry, so a 401 from the API is often
+// recoverable with a freshly minted token rather than a dead refresh_token.
+func (h *Handler) forceRefreshCodexToken(account *config.Account) error {
+	return h.refreshCodexToken(account, true)
+}
+
+func (h *Handler) refreshCodexToken(account *config.Account, force bool) error {
+	if !force && (account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds) {
 		return nil
 	}
 
 	h.tokenRefreshMu.Lock()
 	defer h.tokenRefreshMu.Unlock()
 
+	staleToken := account.AccessToken
+
 	// Re-check after acquiring lock
 	if latest := h.pool.GetByID(account.ID); latest != nil {
 		account.AccessToken = latest.AccessToken
 		account.RefreshToken = latest.RefreshToken
 		account.ExpiresAt = latest.ExpiresAt
-		if account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds {
+		if !force && (account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds) {
+			return nil
+		}
+		// Force path: another goroutine may have rotated the token while we waited
+		// for the lock. If so, the stale token is already replaced — use the fresh
+		// one instead of burning another refresh.
+		if force && latest.AccessToken != "" && latest.AccessToken != staleToken {
 			return nil
 		}
 	}
@@ -145,6 +167,31 @@ func (h *Handler) ensureCodexToken(account *config.Account) error {
 	config.UpdateAccountToken(account.ID, account.AccessToken, account.RefreshToken, expiresAt)
 
 	return nil
+}
+
+// refreshCodexAccountInfo fetches Codex usage/quota info, recovering from an
+// upstream-revoked access token. ChatGPT can invalidate an access token before
+// its locally tracked expiry (returning 401 token_revoked on /usage), so on an
+// auth failure we force a token refresh and retry once. If the refresh_token
+// itself is dead, RefreshTokens short-circuits on invalid_grant/revoked and the
+// error surfaces — the account genuinely needs re-authentication.
+func (h *Handler) refreshCodexAccountInfo(account *config.Account) (*config.AccountInfo, error) {
+	if err := h.ensureCodexToken(account); err != nil {
+		return nil, err
+	}
+	info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
+	if err == nil {
+		return info, nil
+	}
+	if !pool.IsAuthFailure(err) {
+		return info, err
+	}
+
+	logger.Warnf("[Codex] usage auth failure for %s, forcing token refresh: %v", account.Email, err)
+	if refreshErr := h.forceRefreshCodexToken(account); refreshErr != nil {
+		return info, fmt.Errorf("usage auth failed and token refresh failed: %v (original: %w)", refreshErr, err)
+	}
+	return codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
 }
 
 // handleOpenAIChatViaCodex routes an OpenAI Chat Completions request to Codex.

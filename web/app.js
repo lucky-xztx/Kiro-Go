@@ -1371,6 +1371,7 @@
     const body = $('testBody');
     if (!body) return;
     const acc = getTestAccount(testModalAccountId);
+    const isCodex = acc && ((acc.upstream || acc.provider || acc.authMethod || '').toLowerCase() === 'codex');
     const idAttr = escapeAttr(testModalAccountId);
     const email = acc ? getDisplayEmail(acc.email, acc.id) : testModalAccountId;
     const proxy = acc ? (acc.proxyURL || t('accounts.testLog.globalProxy')) : '?';
@@ -1379,13 +1380,17 @@
       : testModalModelError
         ? t('accounts.testModelsFallback')
         : t('accounts.testModelsReady', testModalModels.length);
+    const hasModels = testModalModels.length > 0;
     const modelField = testModalLoadingModels
       ? '<div class="test-model-loading">' + escapeHtml(t('accounts.testModelsLoading')) + '</div>'
-      : testModalModels.length
+      : hasModels
         ? '<select id="testModelChoice">' +
         testModalModels.map(m => '<option value="' + escapeAttr(m) + '">' + escapeHtml(m) + '</option>').join('') +
         '</select>'
-        : '<input type="text" id="testModelChoice" placeholder="claude-sonnet-4" value="claude-sonnet-4" />';
+        : isCodex
+          ? '<div class="test-model-loading">未获取到 Codex 模型，请先重新导入可用账号或刷新模型缓存</div>'
+          : '<input type="text" id="testModelChoice" placeholder="claude-sonnet-4" value="claude-sonnet-4" />';
+    const testDisabled = testModalLoadingModels || (isCodex && !hasModels);
 
     body.innerHTML =
       '<div class="test-modal-account">' +
@@ -1413,7 +1418,7 @@
       '</div>' +
       '<div class="modal-footer">' +
       '<button class="btn btn-secondary" id="testModalCancelBtn" type="button">' + escapeHtml(t('common.close')) + '</button>' +
-      '<button class="btn btn-primary" id="testRunBtn" data-id="' + idAttr + '" type="button" ' + (testModalLoadingModels ? 'disabled' : '') + '>' + escapeHtml(t('accounts.test')) + '</button>' +
+      '<button class="btn btn-primary" id="testRunBtn" data-id="' + idAttr + '" type="button" ' + (testDisabled ? 'disabled' : '') + '>' + escapeHtml(t('accounts.test')) + '</button>' +
       '</div>';
 
     if (!testModalLoadingModels) enhanceCustomSelects(body);

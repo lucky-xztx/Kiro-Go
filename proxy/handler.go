@@ -271,13 +271,10 @@ func (h *Handler) refreshAllAccounts() {
 
 		// ---------- Codex upstream ----------
 		if providers.Normalize(account.Upstream) == "codex" {
-			if err := h.ensureCodexToken(account); err != nil {
-				logger.Warnf("[BackgroundRefresh] Codex token refresh failed for %s: %v", account.Email, err)
-				continue
-			}
-			info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
+			info, err := h.refreshCodexAccountInfo(account)
 			if err != nil {
 				logger.Warnf("[BackgroundRefresh] Codex info refresh failed for %s: %v", account.Email, err)
+				h.handleAccountFailure(account, err)
 				continue
 			}
 			config.UpdateAccountInfo(account.ID, *info)
@@ -3203,11 +3200,28 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
 			return
 		}
-		model := req.Model
-		if model == "" {
-			model = "gpt-5.5"
+		model := strings.TrimSpace(req.Model)
+		cachedModels := h.pool.GetModelList(account.ID)
+		if len(cachedModels) == 0 {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Codex account has no cached models; refresh models or re-import a valid account before testing"})
+			return
 		}
-		model = codexModelForRequest(model)
+		if model == "" {
+			model = cachedModels[0]
+		}
+		validModel := false
+		for _, m := range cachedModels {
+			if m == model {
+				validModel = true
+				break
+			}
+		}
+		if !validModel {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Model is not available for this Codex account: " + model})
+			return
+		}
 		codexReq := codex.ConvertOpenAIToCodex(
 			[]codex.OpenAIChatMessage{{Role: "user", Content: "say ok"}},
 			model, true, nil, "medium",
@@ -3331,12 +3345,7 @@ func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id s
 
 	// ---------- Codex upstream ----------
 	if providers.Normalize(account.Upstream) == "codex" {
-		if err := h.ensureCodexToken(account); err != nil {
-			w.WriteHeader(500)
-			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
-			return
-		}
-		info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
+		info, err := h.refreshCodexAccountInfo(account)
 		if err != nil {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
