@@ -113,6 +113,8 @@ func (h *Handler) handleUserAPI(w http.ResponseWriter, r *http.Request) bool {
 	case strings.HasPrefix(path, "/api/me/keys/") && r.Method == "PUT":
 		id := strings.TrimPrefix(path, "/api/me/keys/")
 		h.apiUpdateMyKey(w, r, id)
+	case path == "/api/me/logs" && r.Method == "GET":
+		h.apiListMyLogs(w, r)
 	default:
 		// Public endpoints (already handled in the main router) shouldn't reach
 		// here; for everything else under /api/, signal "not handled".

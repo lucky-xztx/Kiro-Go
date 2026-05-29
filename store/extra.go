@@ -65,6 +65,75 @@ type LogQuery struct {
 	AccountID string
 	Since     int64 // unix seconds, 0 means no lower bound
 	Limit     int   // default 100, max 1000
+	Offset    int   // for pagination
+}
+
+// CountRequestLogs returns the total number of rows matching the query (ignores Limit/Offset).
+func CountRequestLogs(q LogQuery) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	args := []interface{}{}
+	wheres := []string{}
+	if q.ApiKeyID != "" {
+		wheres = append(wheres, "api_key_id = ?")
+		args = append(args, q.ApiKeyID)
+	}
+	if q.UserID != "" {
+		wheres = append(wheres, "user_id = ?")
+		args = append(args, q.UserID)
+	}
+	if q.AccountID != "" {
+		wheres = append(wheres, "account_id = ?")
+		args = append(args, q.AccountID)
+	}
+	if q.Since > 0 {
+		wheres = append(wheres, "created_at >= ?")
+		args = append(args, q.Since)
+	}
+	where := ""
+	if len(wheres) > 0 {
+		where = " WHERE " + strings.Join(wheres, " AND ")
+	}
+	var n int64
+	row := db.QueryRow(`SELECT COUNT(*) FROM request_logs`+where, args...)
+	if err := row.Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// RateStats aggregates request count and token sum within a window.
+type RateStats struct {
+	Requests int64 `json:"requests"`
+	Tokens   int64 `json:"tokens"`
+}
+
+// RequestRate returns request count and token sum for the given query within
+// the time window [since, now]. Used for RPM/TPM-style metrics.
+func RequestRate(q LogQuery, since int64) (RateStats, error) {
+	var s RateStats
+	if db == nil {
+		return s, nil
+	}
+	args := []interface{}{since}
+	wheres := []string{"created_at >= ?"}
+	if q.ApiKeyID != "" {
+		wheres = append(wheres, "api_key_id = ?")
+		args = append(args, q.ApiKeyID)
+	}
+	if q.UserID != "" {
+		wheres = append(wheres, "user_id = ?")
+		args = append(args, q.UserID)
+	}
+	row := db.QueryRow(
+		`SELECT COUNT(*), IFNULL(SUM(input_tokens + output_tokens), 0)
+		   FROM request_logs WHERE `+strings.Join(wheres, " AND "),
+		args...)
+	if err := row.Scan(&s.Requests, &s.Tokens); err != nil {
+		return s, err
+	}
+	return s, nil
 }
 
 func ListRequestLogs(q LogQuery) ([]RequestLog, error) {
@@ -99,12 +168,12 @@ func ListRequestLogs(q LogQuery) ([]RequestLog, error) {
 	if len(wheres) > 0 {
 		where = " WHERE " + strings.Join(wheres, " AND ")
 	}
-	args = append(args, q.Limit)
+	args = append(args, q.Limit, q.Offset)
 	rows, err := db.Query(
 		`SELECT id, created_at, IFNULL(api_key_id,''), IFNULL(user_id,''), IFNULL(account_id,''),
 		        IFNULL(provider,''), IFNULL(model,''), IFNULL(path,''), status,
 		        input_tokens, output_tokens, credits, latency_ms, IFNULL(error,'')
-		 FROM request_logs`+where+` ORDER BY created_at DESC LIMIT ?`,
+		 FROM request_logs`+where+` ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		args...)
 	if err != nil {
 		return nil, err

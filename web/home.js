@@ -85,17 +85,6 @@
     return Number(n).toLocaleString();
   }
 
-  function formatTime(ts) {
-    if (!ts) return "-";
-    var d = new Date(typeof ts === "number" ? ts * 1000 : ts);
-    if (isNaN(d.getTime())) return "-";
-    var pad = function (n) { return n < 10 ? "0" + n : n; };
-    return (
-      d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
-      " " + pad(d.getHours()) + ":" + pad(d.getMinutes())
-    );
-  }
-
   function bindCopy() {
     document.querySelectorAll("[data-copy]").forEach(function (el) {
       el.addEventListener("click", function () {
@@ -144,6 +133,47 @@
       });
   }
 
+  function loadModels() {
+    var listEl = $("modelsList");
+    if (!listEl) return;
+    fetch("/v1/models")
+      .then(function (r) {
+        return r.ok ? r.json() : Promise.reject(r.status);
+      })
+      .then(function (data) {
+        var models = (data && data.data) || [];
+        if (!models.length) {
+          listEl.innerHTML = '<span class="no-models">暂无可用模型</span>';
+          return;
+        }
+        var ids = [];
+        var seen = {};
+        models.forEach(function (m) {
+          var id = m && m.id;
+          if (!id || seen[id]) return;
+          seen[id] = true;
+          ids.push(id);
+        });
+        listEl.innerHTML = ids
+          .map(function (id) {
+            var safe = escapeHTML(id);
+            return '<span class="model-tag" data-model="' + safe + '">' + safe + "</span>";
+          })
+          .join("");
+        listEl.querySelectorAll(".model-tag").forEach(function (tag) {
+          tag.addEventListener("click", function () {
+            var name = tag.getAttribute("data-model");
+            safeCopy(name).then(function () {
+              showToast("已复制：" + name);
+            });
+          });
+        });
+      })
+      .catch(function () {
+        listEl.innerHTML = '<span class="no-models">加载失败</span>';
+      });
+  }
+
   /* ---------------------- Auth ---------------------- */
 
   function api(path, opts) {
@@ -175,11 +205,11 @@
     if (!box) return;
     if (currentUser) {
       var roleLabel = currentUser.role === "admin" ? "ADMIN" : "USER";
-      var roleClass = currentUser.role === "admin" ? "" : "user";
+      var roleClass = currentUser.role === "admin" ? "" : " role-user";
       box.innerHTML =
-        '<span class="user-chip">' +
-          '<span class="role-badge ' + roleClass + '">' + roleLabel + '</span>' +
-          escapeHTML(currentUser.username) +
+        '<span class="user-pill">' +
+          '<span class="role-badge' + roleClass + '">' + roleLabel + '</span>' +
+          '<span class="username">' + escapeHTML(currentUser.username) + '</span>' +
         '</span>' +
         '<button type="button" class="btn-ghost" id="logoutBtn">退出</button>';
       var btn = $("logoutBtn");
@@ -195,15 +225,6 @@
     if (entry) {
       if (currentUser && currentUser.role === "admin") entry.removeAttribute("hidden");
       else entry.setAttribute("hidden", "");
-    }
-    var card = $("myKeysCard");
-    if (card) {
-      if (currentUser) {
-        card.removeAttribute("hidden");
-        loadMyKeys();
-      } else {
-        card.setAttribute("hidden", "");
-      }
     }
   }
 
@@ -327,138 +348,14 @@
     });
   }
 
-  /* ---------------------- Keys ---------------------- */
-
-  function loadMyKeys() {
-    var box = $("keysList");
-    if (!box) return;
-    box.innerHTML = '<p class="muted-line">加载中...</p>';
-    api("/api/me/keys").then(function (d) {
-      var keys = (d && d.keys) || [];
-      renderKeys(keys);
-    }).catch(function (e) {
-      box.innerHTML = '<p class="muted-line">加载失败：' + escapeHTML(e.message || "") + "</p>";
-    });
-  }
-
-  function renderKeys(keys) {
-    var box = $("keysList");
-    if (!box) return;
-    if (!keys.length) {
-      box.innerHTML = '<p class="muted-line">还没有 Key，点击右上角生成。</p>';
-      return;
-    }
-    box.innerHTML = keys.map(function (k) {
-      var status = k.enabled
-        ? '<span class="pill">启用</span>'
-        : '<span class="pill off">已禁用</span>';
-      var tokens = formatTokens(k.tokensUsed || 0);
-      var tlimit = k.tokenLimit ? "/" + formatTokens(k.tokenLimit) : "";
-      var credits = (k.creditsUsed || 0).toFixed(2);
-      var climit = k.creditLimit ? "/" + Number(k.creditLimit).toFixed(2) : "";
-      var last = k.lastUsedAt ? formatTime(k.lastUsedAt) : "未使用";
-      return (
-        '<div class="key-item" data-id="' + escapeHTML(k.id) + '">' +
-          '<div class="key-item-main">' +
-            '<div class="key-name">' + escapeHTML(k.name || "未命名") + "</div>" +
-            '<div class="key-secret">' + escapeHTML(k.masked || "") + "</div>" +
-            '<div class="key-meta">' +
-              status +
-              '<span>Tokens ' + tokens + tlimit + "</span>" +
-              '<span>Credits ' + credits + climit + "</span>" +
-              '<span>最近使用 ' + last + "</span>" +
-            "</div>" +
-          "</div>" +
-          '<div class="key-actions">' +
-            '<button type="button" class="btn-mini" data-action="toggle">' +
-              (k.enabled ? "禁用" : "启用") + "</button>" +
-            '<button type="button" class="btn-mini danger" data-action="delete">删除</button>' +
-          "</div>" +
-        "</div>"
-      );
-    }).join("");
-    box.querySelectorAll(".key-item").forEach(function (row) {
-      var id = row.getAttribute("data-id");
-      row.querySelectorAll("[data-action]").forEach(function (btn) {
-        btn.addEventListener("click", function () {
-          var action = btn.getAttribute("data-action");
-          if (action === "toggle") {
-            var nextEnabled = btn.textContent.trim() === "启用";
-            api("/api/me/keys/" + encodeURIComponent(id), {
-              method: "PUT",
-              body: JSON.stringify({ enabled: nextEnabled }),
-            }).then(loadMyKeys).catch(function (e) {
-              showToast("操作失败：" + (e.message || ""));
-            });
-          } else if (action === "delete") {
-            if (!confirm("确定要删除这个 Key 吗？删除后无法恢复。")) return;
-            api("/api/me/keys/" + encodeURIComponent(id), { method: "DELETE" })
-              .then(loadMyKeys)
-              .catch(function (e) {
-                showToast("删除失败：" + (e.message || ""));
-              });
-          }
-        });
-      });
-    });
-  }
-
-  function bindKeyControls() {
-    var newBtn = $("newKeyBtn");
-    if (newBtn) {
-      newBtn.addEventListener("click", function () {
-        var name = prompt("为新 Key 起个名字（可留空）：", "");
-        if (name === null) return;
-        newBtn.disabled = true;
-        api("/api/me/keys", {
-          method: "POST",
-          body: JSON.stringify({ name: (name || "").trim() }),
-        }).then(function (d) {
-          var k = d && d.key;
-          if (k && k.key) showNewKey(k.key);
-          loadMyKeys();
-        }).catch(function (e) {
-          showToast("创建失败：" + (e.message || ""));
-        }).then(function () {
-          newBtn.disabled = false;
-        });
-      });
-    }
-    var copy = $("copyNewKey");
-    if (copy) {
-      copy.addEventListener("click", function () {
-        var v = $("newKeyValue");
-        if (!v) return;
-        safeCopy(v.textContent || "").then(function () {
-          showToast("已复制完整 Key");
-        });
-      });
-    }
-    var dismiss = $("dismissNewKey");
-    if (dismiss) {
-      dismiss.addEventListener("click", function () {
-        var box = $("newKeyBox");
-        if (box) box.setAttribute("hidden", "");
-      });
-    }
-  }
-
-  function showNewKey(value) {
-    var box = $("newKeyBox");
-    var v = $("newKeyValue");
-    if (!box || !v) return;
-    v.textContent = value;
-    box.removeAttribute("hidden");
-  }
-
   /* ---------------------- Init ---------------------- */
 
   function init() {
     setEndpoints();
     bindCopy();
     loadStatus();
+    loadModels();
     bindAuthModal();
-    bindKeyControls();
     loadMe();
     setInterval(loadStatus, 30000);
   }

@@ -9,6 +9,7 @@ import (
 	"kiro-go/logger"
 	"kiro-go/pool"
 	"kiro-go/providers"
+	"kiro-go/providers/codex"
 	"kiro-go/store"
 	"net/http"
 	"strings"
@@ -473,11 +474,8 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 	thinkingSuffix := config.GetThinkingConfig().Suffix
 
 	models := buildAnthropicModelsResponse(cached, thinkingSuffix)
-	if len(models) == 0 {
-		models = fallbackAnthropicModels(thinkingSuffix)
-	}
 
-	// 添加别名模型
+	// 别名模型（始终暴露 auto；gpt-4* 仅作为 OpenAI 兼容客户端入口的占位）
 	models = append(models,
 		buildModelInfo("auto", "kiro-proxy", true),
 		buildModelInfo("gpt-4o", "kiro-proxy", true),
@@ -498,34 +496,13 @@ func buildAnthropicModelsResponse(cached []ModelInfo, thinkingSuffix string) []m
 	}
 
 	models := make([]map[string]interface{}, 0, len(cached)*2)
-	if len(cached) > 0 {
-		for _, m := range cached {
-			supportsImage := modelSupportsImage(m.InputTypes)
-			models = append(models, buildModelInfo(m.ModelId, "anthropic", supportsImage))
-			// 自动生成 thinking 变体
-			models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, "anthropic", supportsImage))
-		}
+	for _, m := range cached {
+		supportsImage := modelSupportsImage(m.InputTypes)
+		models = append(models, buildModelInfo(m.ModelId, "kiro", supportsImage))
+		// 自动生成 thinking 变体
+		models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, "kiro", supportsImage))
 	}
 	return models
-}
-
-func fallbackAnthropicModels(thinkingSuffix string) []map[string]interface{} {
-	return []map[string]interface{}{
-		buildModelInfo("claude-sonnet-4.6", "anthropic", true),
-		buildModelInfo("claude-sonnet-4.6"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-opus-4.6", "anthropic", true),
-		buildModelInfo("claude-opus-4.6"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-opus-4.7", "anthropic", true),
-		buildModelInfo("claude-opus-4.7"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-sonnet-4.5", "anthropic", true),
-		buildModelInfo("claude-sonnet-4.5"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-sonnet-4", "anthropic", true),
-		buildModelInfo("claude-sonnet-4"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-haiku-4.5", "anthropic", true),
-		buildModelInfo("claude-haiku-4.5"+thinkingSuffix, "anthropic", true),
-		buildModelInfo("claude-opus-4.5", "anthropic", true),
-		buildModelInfo("claude-opus-4.5"+thinkingSuffix, "anthropic", true),
-	}
 }
 
 func modelSupportsImage(inputTypes []string) bool {
@@ -3573,10 +3550,11 @@ func (h *Handler) apiUpdateEndpointConfig(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
-// applyProxyConfig 将代理配置应用到所有出站 HTTP 客户端（Kiro API + auth 模块）
+// applyProxyConfig 将代理配置应用到所有出站 HTTP 客户端（Kiro API + auth 模块 + Codex）
 func applyProxyConfig(proxyURL string) {
 	InitKiroHttpClient(proxyURL)
 	auth.InitHttpClient(proxyURL)
+	codex.SetProxy(proxyURL)
 }
 
 // apiGetProxy 获取当前代理配置

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,8 +19,40 @@ const (
 	userAgent   = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9"
 )
 
-var defaultHTTPClient = &http.Client{
-	Timeout: 5 * time.Minute,
+var httpClientStore atomic.Pointer[http.Client]
+
+func init() {
+	SetProxy("")
+}
+
+// SetProxy reconfigures the codex HTTP client to use the given outbound proxy URL.
+// An empty string falls back to HTTPS_PROXY/HTTP_PROXY environment variables.
+func SetProxy(proxyURL string) {
+	t := &http.Transport{
+		MaxIdleConns:        50,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
+		ForceAttemptHTTP2:   true,
+	}
+	if strings.TrimSpace(proxyURL) != "" {
+		if u, err := url.Parse(proxyURL); err == nil {
+			t.Proxy = http.ProxyURL(u)
+			t.ForceAttemptHTTP2 = false
+		}
+	} else {
+		t.Proxy = http.ProxyFromEnvironment
+	}
+	httpClientStore.Store(&http.Client{
+		Timeout:   5 * time.Minute,
+		Transport: t,
+	})
+}
+
+func defaultHTTPClient() *http.Client {
+	if c := httpClientStore.Load(); c != nil {
+		return c
+	}
+	return &http.Client{Timeout: 5 * time.Minute}
 }
 
 // CodexRequest is the body sent to chatgpt.com/backend-api/codex/responses.
@@ -69,7 +103,7 @@ func CallCodexAPI(accessToken, accountID string, req *CodexRequest, cb *StreamCa
 
 	applyCodexHeaders(httpReq, accessToken, accountID, req.Stream)
 
-	resp, err := defaultHTTPClient.Do(httpReq)
+	resp, err := defaultHTTPClient().Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("codex request failed: %w", err)
 	}

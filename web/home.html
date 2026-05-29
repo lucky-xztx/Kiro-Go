@@ -30,60 +30,43 @@
     </div>
   </div>
 
-  <div class="page">
-    <header class="hero">
-      <div class="hero-brand">
-        <img class="hero-logo" src="/admin/favicon.ico" alt="Kiro-Go" />
-        <h1 id="serverName">Kiro-Go</h1>
-      </div>
-      <p class="subtitle">Claude / OpenAI 双协议兼容的 Kiro API 中转服务</p>
-      <a class="hero-link" href="/admin" target="_self" id="adminEntry" hidden>
-        <span>进入管理面板</span>
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h14M13 5l7 7-7 7" />
-        </svg>
-      </a>
-    </header>
+  <div class="container">
+    <h1 id="serverName">Kiro-Go</h1>
+    <p class="subtitle">Claude / OpenAI 双协议兼容的 Kiro API 中转服务</p>
+
+    <a class="hero-link" href="/admin" target="_self" id="adminEntry" hidden>
+      <span>进入管理面板</span>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M13 5l7 7-7 7" />
+      </svg>
+    </a>
 
     <section class="card">
       <h2>接入信息</h2>
       <div class="info-row">
         <span class="info-label">Claude</span>
-        <div class="info-value mono" id="claudeUrl" data-copy>-</div>
+        <div class="info-value" id="claudeUrl" data-copy>-</div>
       </div>
       <div class="info-row">
         <span class="info-label">OpenAI</span>
-        <div class="info-value mono" id="openaiUrl" data-copy>-</div>
+        <div class="info-value" id="openaiUrl" data-copy>-</div>
       </div>
       <div class="info-row">
         <span class="info-label">Models</span>
-        <div class="info-value mono" id="modelsUrl" data-copy>-</div>
+        <div class="info-value" id="modelsUrl" data-copy>-</div>
       </div>
-    </section>
-
-    <!-- 我的 Key（登录后显示） -->
-    <section class="card" id="myKeysCard" hidden>
-      <div class="keys-header">
-        <h2>我的 API Key</h2>
-        <button type="button" class="btn-pill" id="newKeyBtn">+ 生成新 Key</button>
-      </div>
-      <div id="newKeyBox" class="new-key-box" hidden>
-        <p class="new-key-tip">这是 Key 的完整值，仅显示一次，请妥善保存：</p>
-        <div class="new-key-row">
-          <code id="newKeyValue"></code>
-          <button type="button" class="btn-mini" id="copyNewKey">复制</button>
-          <button type="button" class="btn-mini" id="dismissNewKey">收起</button>
+      <div class="info-row info-row-top">
+        <span class="info-label">模型</span>
+        <div class="models-list" id="modelsList">
+          <span class="no-models">加载中...</span>
         </div>
-      </div>
-      <div class="keys-list" id="keysList">
-        <p class="muted-line">还没有 Key，点击右上角生成。</p>
       </div>
     </section>
 
     <section class="card">
       <h2>服务状态</h2>
-      <div class="stat-grid">
+      <div class="status-grid">
         <div class="stat-item">
           <div class="stat-value" id="uptime">-</div>
           <div class="stat-label">运行时间</div>
@@ -111,7 +94,7 @@
       </div>
     </section>
 
-    <footer class="hero-footer">
+    <footer class="footer">
       <span>Powered by Kiro-Go</span>
       <span class="dot">·</span>
       <span id="versionTag">v-</span>
