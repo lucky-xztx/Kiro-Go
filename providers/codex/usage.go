@@ -73,7 +73,7 @@ func GetUsage(accessToken, accountID string) (*CodexUsageResponse, error) {
 // it as a JWT yields garbage and would overwrite the persisted id_token
 // claims with each refresh. Leaving info.Email/info.UserId empty causes
 // config.UpdateAccountInfo to keep the existing values.
-func RefreshCodexAccountInfo(accessToken, refreshToken, accountID string) (*config.AccountInfo, error) {
+func RefreshCodexAccountInfo(accessToken, accountID string) (*config.AccountInfo, error) {
 	info := &config.AccountInfo{
 		LastRefresh: time.Now().Unix(),
 		IsCodex:     true,

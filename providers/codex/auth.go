@@ -106,26 +106,42 @@ func ExchangeCode(code, codeVerifier string) (*TokenResponse, error) {
 }
 
 // RefreshTokens exchanges a refresh_token for a new access_token.
+//
+// IMPORTANT: unlike the authorization_code exchange (which is form-urlencoded),
+// the Codex CLI sends the refresh request as a JSON body with the reduced
+// scope "openid profile email" (no offline_access). Sending it form-encoded or
+// with the wider scope makes auth.openai.com reject it with HTTP 401. This
+// mirrors the canonical Codex CLI behavior (see codex-lb refresh.py).
 func RefreshTokens(refreshToken string) (*TokenResponse, error) {
-	data := url.Values{
-		"client_id":     {clientID},
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"scope":         {scopeStr},
+	payload := map[string]string{
+		"grant_type":    "refresh_token",
+		"client_id":     clientID,
+		"refresh_token": refreshToken,
+		"scope":         "openid profile email",
 	}
 
+	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		tr, err := doTokenRequestRaw(data)
-		if err != nil {
-			return nil, fmt.Errorf("codex token refresh request failed: %w", err)
-		}
-		if tr != nil {
+		tr, err := doTokenRequestJSON(payload)
+		if err == nil && tr != nil {
 			return tr, nil
 		}
-		logger.Debugf("[CodexAuth] token refresh attempt %d failed", attempt+1)
+		if err != nil {
+			lastErr = err
+			// invalid_grant / reused tokens are permanent — don't retry.
+			if strings.Contains(err.Error(), "invalid_grant") ||
+				strings.Contains(err.Error(), "reused") ||
+				strings.Contains(err.Error(), "revoked") {
+				return nil, err
+			}
+		}
+		logger.Debugf("[CodexAuth] token refresh attempt %d failed: %v", attempt+1, err)
 		if attempt < 2 {
 			time.Sleep(time.Duration(1<<attempt) * time.Second)
 		}
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("codex token refresh failed after 3 attempts: %w", lastErr)
 	}
 	return nil, fmt.Errorf("codex token refresh failed after 3 attempts")
 }
@@ -142,24 +158,113 @@ func doTokenRequestRaw(data url.Values) (*TokenResponse, error) {
 	}
 	defer resp.Body.Close()
 
+	respBody, _ := io_ReadAll(resp.Body)
+
 	if resp.StatusCode == 200 {
 		var tr TokenResponse
-		if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
+		if err := json.Unmarshal(respBody, &tr); err != nil {
 			return nil, fmt.Errorf("codex token decode failed: %w", err)
 		}
 		return &tr, nil
 	}
 
-	var errBody struct {
-		Error            string `json:"error"`
-		ErrorDescription string `json:"error_description"`
-	}
-	_ = json.NewDecoder(resp.Body).Decode(&errBody)
+	return nil, tokenErrorFromBody(resp.StatusCode, respBody)
+}
 
-	if errBody.Error == "refresh_token_reused" {
-		return nil, fmt.Errorf("codex refresh token reused/revoked: %s", errBody.ErrorDescription)
+// parseTokenError extracts the OAuth error code and description from a token
+// endpoint error body. OpenAI returns two shapes depending on the endpoint:
+//   - flat OAuth2:  {"error":"invalid_grant","error_description":"..."}
+//   - nested:       {"error":{"code":"refresh_token_reused","message":"..."}}
+//
+// Both must be handled, otherwise reused/revoked tokens slip past the retry
+// short-circuit (see RefreshTokens).
+func parseTokenError(body []byte) (code, message string) {
+	var probe struct {
+		Error            json.RawMessage `json:"error"`
+		ErrorDescription string          `json:"error_description"`
 	}
-	return nil, fmt.Errorf("codex token request failed: HTTP %d %s", resp.StatusCode, errBody.Error)
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return "", ""
+	}
+
+	// Flat shape: error is a JSON string.
+	var flat string
+	if json.Unmarshal(probe.Error, &flat) == nil && flat != "" {
+		return flat, probe.ErrorDescription
+	}
+
+	// Nested shape: error is an object.
+	var nested struct {
+		Code    string `json:"code"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(probe.Error, &nested) == nil {
+		c := nested.Code
+		if c == "" {
+			c = nested.Error
+		}
+		return c, nested.Message
+	}
+
+	return "", probe.ErrorDescription
+}
+
+// tokenErrorFromBody builds the error returned for a non-200 token response,
+// special-casing reused/revoked refresh tokens so callers can short-circuit.
+func tokenErrorFromBody(statusCode int, body []byte) error {
+	code, message := parseTokenError(body)
+
+	if code == "refresh_token_reused" {
+		return fmt.Errorf("codex refresh token reused/revoked: %s", message)
+	}
+	if code != "" {
+		return fmt.Errorf("codex token request failed: HTTP %d %s: %s", statusCode, code, message)
+	}
+	// No recognizable error JSON — surface the raw body so geo-blocks / HTML
+	// error pages / unexpected shapes are visible instead of a bare status.
+	snippet := strings.TrimSpace(string(body))
+	if len(snippet) > 300 {
+		snippet = snippet[:300]
+	}
+	return fmt.Errorf("codex token request failed: HTTP %d body=%q", statusCode, snippet)
+}
+
+// doTokenRequestJSON sends a token request with a JSON body. Used for the
+// refresh_token grant: the Codex CLI sends refreshes as JSON (not form-encoded)
+// with the reduced scope "openid profile email". Sending it form-encoded or with
+// offline_access makes auth.openai.com reject it with HTTP 401.
+func doTokenRequestJSON(payload map[string]string) (*TokenResponse, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("codex token request marshal failed: %w", err)
+	}
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", userAgent)
+
+	resp, err := defaultHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io_ReadAll(resp.Body)
+
+	if resp.StatusCode == 200 {
+		var tr TokenResponse
+		if err := json.Unmarshal(respBody, &tr); err != nil {
+			return nil, fmt.Errorf("codex token decode failed: %w", err)
+		}
+		return &tr, nil
+	}
+
+	return nil, tokenErrorFromBody(resp.StatusCode, respBody)
 }
 
 // ==================== Device Code Flow ====================

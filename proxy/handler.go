@@ -275,7 +275,7 @@ func (h *Handler) refreshAllAccounts() {
 				logger.Warnf("[BackgroundRefresh] Codex token refresh failed for %s: %v", account.Email, err)
 				continue
 			}
-			info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.RefreshToken, account.UserId)
+			info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
 			if err != nil {
 				logger.Warnf("[BackgroundRefresh] Codex info refresh failed for %s: %v", account.Email, err)
 				continue
@@ -495,12 +495,10 @@ func (h *Handler) handleModels(w http.ResponseWriter, r *http.Request) {
 
 	models := buildAnthropicModelsResponse(cached, thinkingSuffix)
 
-	// 别名模型（始终暴露 auto；gpt-4* 仅作为 OpenAI 兼容客户端入口的占位）
-	models = append(models,
-		buildModelInfo("auto", "kiro-proxy", true),
-		buildModelInfo("gpt-4o", "kiro-proxy", true),
-		buildModelInfo("gpt-4", "kiro-proxy", true),
-	)
+	// 仅暴露真实可用模型 + auto 路由别名。不再写死 gpt-4o/gpt-4 占位模型
+	// （它们并非真实可用，只会误导客户端）。Codex / Kiro 的真实模型由各自
+	// upstream 实时拉取后进入 cached。
+	models = append(models, buildModelInfo("auto", "kiro-proxy", true))
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -518,9 +516,15 @@ func buildAnthropicModelsResponse(cached []ModelInfo, thinkingSuffix string) []m
 	models := make([]map[string]interface{}, 0, len(cached)*2)
 	for _, m := range cached {
 		supportsImage := modelSupportsImage(m.InputTypes)
-		models = append(models, buildModelInfo(m.ModelId, "kiro", supportsImage))
-		// 自动生成 thinking 变体
-		models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, "kiro", supportsImage))
+		ownedBy := m.Provider
+		if ownedBy == "" {
+			ownedBy = "kiro"
+		}
+		models = append(models, buildModelInfo(m.ModelId, ownedBy, supportsImage))
+		// thinking 变体是 Kiro 的扩展推理机制；Codex 用 reasoning effort，不加后缀变体。
+		if ownedBy == "kiro" && thinkingSuffix != "" {
+			models = append(models, buildModelInfo(m.ModelId+thinkingSuffix, ownedBy, supportsImage))
+		}
 	}
 	return models
 }
@@ -578,6 +582,31 @@ func (h *Handler) refreshModelsCache() {
 	aggregated := make([]ModelInfo, 0)
 	for i := range accounts {
 		account := &accounts[i]
+
+		// ---------- Codex upstream: live /codex/models ----------
+		if providers.Normalize(account.Upstream) == "codex" {
+			if err := h.ensureCodexToken(account); err != nil {
+				logger.Warnf("[ModelsCache] Skip Codex %s token refresh failed: %v", account.Email, err)
+				h.handleAccountFailure(account, err)
+				continue
+			}
+			raw, err := codex.FetchCodexModels(account.AccessToken, account.UserId)
+			if err != nil {
+				logger.Warnf("[ModelsCache] Failed to fetch Codex models for %s: %v", account.Email, err)
+				h.handleAccountFailure(account, err)
+				continue
+			}
+			models := codexModelsToModelInfo(raw)
+			modelIDs := make([]string, 0, len(models))
+			for _, m := range models {
+				modelIDs = append(modelIDs, m.ModelId)
+			}
+			h.pool.SetModelList(account.ID, modelIDs)
+			aggregated = mergeUniqueModels(aggregated, models)
+			continue
+		}
+
+		// ---------- Kiro (default) upstream ----------
 		if err := h.ensureValidToken(account); err != nil {
 			logger.Warnf("[ModelsCache] Skip %s token refresh failed: %v", account.Email, err)
 			h.handleAccountFailure(account, err)
@@ -611,6 +640,11 @@ func (h *Handler) refreshModelsCache() {
 // fetchAndCacheAccountModels 为单个账号拉取并写入模型缓存。
 // 同时更新 pool 的路由缓存与全局聚合模型列表。
 func (h *Handler) fetchAndCacheAccountModels(account *config.Account) error {
+	// Codex accounts use the live ChatGPT models endpoint, not the AWS API.
+	if providers.Normalize(account.Upstream) == "codex" {
+		_, err := h.fetchCodexAccountModels(account)
+		return err
+	}
 	if err := h.ensureValidToken(account); err != nil {
 		return fmt.Errorf("token refresh failed: %w", err)
 	}
@@ -722,6 +756,9 @@ func mergeModelInfo(base ModelInfo, extra ModelInfo) ModelInfo {
 	}
 	if base.TokenLimits == nil {
 		base.TokenLimits = extra.TokenLimits
+	}
+	if base.Provider == "" {
+		base.Provider = extra.Provider
 	}
 	base.InputTypes = mergeStringLists(base.InputTypes, extra.InputTypes)
 	return base
@@ -3299,7 +3336,7 @@ func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id s
 			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
 			return
 		}
-		info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.RefreshToken, account.UserId)
+		info, err := codex.RefreshCodexAccountInfo(account.AccessToken, account.UserId)
 		if err != nil {
 			w.WriteHeader(500)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
@@ -3508,6 +3545,21 @@ func (h *Handler) apiGetAccountModels(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 
+	// Codex accounts use the live ChatGPT models endpoint, not the AWS API.
+	if providers.Normalize(account.Upstream) == "codex" {
+		models, err := h.fetchCodexAccountModels(account)
+		if err != nil {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"models":  models,
+		})
+		return
+	}
+
 	models, err := ListAvailableModels(account)
 	if err != nil {
 		w.WriteHeader(500)
@@ -3533,18 +3585,10 @@ func (h *Handler) apiGetAccountModels(w http.ResponseWriter, r *http.Request, id
 }
 
 // apiGetAccountModelsCached 返回账号已缓存的模型列表（不实时拉取）
+// apiGetAccountModelsCached 返回账号已缓存的模型列表（不实时拉取）。
+// 缓存由 refreshModelsCache / fetchCodexAccountModels 按 upstream 实时拉取后写入，
+// 不再对任何 upstream 写死模型列表。
 func (h *Handler) apiGetAccountModelsCached(w http.ResponseWriter, r *http.Request, id string) {
-	for _, a := range config.GetAccounts() {
-		if a.ID == id && providers.Normalize(a.Upstream) == "codex" {
-			out := make([]string, len(codexModels))
-			copy(out, codexModels)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"success": true,
-				"models":  out,
-			})
-			return
-		}
-	}
 	models := h.pool.GetModelList(id)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,

@@ -414,7 +414,10 @@ type ModelInfo struct {
 	Description    string   `json:"description"`
 	InputTypes     []string `json:"supportedInputTypes"`
 	RateMultiplier float64  `json:"rateMultiplier"`
-	TokenLimits    *struct {
+	// Provider marks which upstream this model belongs to: "kiro" (default) or
+	// "codex". Used to tag aggregated /v1/models output by owner.
+	Provider    string `json:"provider,omitempty"`
+	TokenLimits *struct {
 		MaxInputTokens  int `json:"maxInputTokens"`
 		MaxOutputTokens int `json:"maxOutputTokens"`
 	} `json:"tokenLimits"`

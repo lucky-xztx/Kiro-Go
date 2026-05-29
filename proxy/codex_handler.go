@@ -37,11 +37,58 @@ func codexModelForRequest(model string) string {
 	return "gpt-5.5"
 }
 
+// codexModels is a minimal fallback used only for request routing when a client
+// sends a model name we can't otherwise resolve. The list actually advertised
+// to clients (and shown in the admin panel) comes from the live
+// codex.FetchCodexModels call, not from here.
 var codexModels = []string{
 	"gpt-5.5",
 	"gpt-5.4",
 	"gpt-5.3-codex",
 	"gpt-5.3-codex-spark",
+}
+
+// codexModelsToModelInfo converts the live Codex model list into the unified
+// ModelInfo shape used by the aggregated /v1/models cache, tagging each as a
+// codex-owned model.
+func codexModelsToModelInfo(models []codex.CodexModel) []ModelInfo {
+	out := make([]ModelInfo, 0, len(models))
+	for _, m := range models {
+		out = append(out, ModelInfo{
+			ModelId:     m.Slug,
+			ModelName:   m.DisplayName,
+			Description: m.Description,
+			InputTypes:  m.InputModalities,
+			Provider:    "codex",
+		})
+	}
+	return out
+}
+
+// fetchCodexAccountModels refreshes the live model list for a single Codex
+// account and writes it into the pool routing cache + aggregated cache.
+func (h *Handler) fetchCodexAccountModels(account *config.Account) ([]ModelInfo, error) {
+	if err := h.ensureCodexToken(account); err != nil {
+		return nil, fmt.Errorf("token refresh failed: %w", err)
+	}
+	raw, err := codex.FetchCodexModels(account.AccessToken, account.UserId)
+	if err != nil {
+		return nil, err
+	}
+	models := codexModelsToModelInfo(raw)
+	modelIDs := make([]string, 0, len(models))
+	for _, m := range models {
+		modelIDs = append(modelIDs, m.ModelId)
+	}
+	h.pool.SetModelList(account.ID, modelIDs)
+
+	h.modelsCacheMu.Lock()
+	h.cachedModels = mergeUniqueModels(h.cachedModels, models)
+	h.modelsCacheTime = time.Now().Unix()
+	h.modelsCacheMu.Unlock()
+
+	logger.Infof("[ModelsCache] Refreshed %d Codex models for account %s", len(models), account.Email)
+	return models, nil
 }
 
 // getNextCodexAccount returns the next available Codex upstream account.
@@ -91,8 +138,11 @@ func (h *Handler) ensureCodexToken(account *config.Account) error {
 	}
 	account.ExpiresAt = expiresAt
 
-	h.pool.UpdateToken(account.ID, tr.AccessToken, tr.RefreshToken, expiresAt)
-	config.UpdateAccountToken(account.ID, tr.AccessToken, tr.RefreshToken, expiresAt)
+	// Persist account.RefreshToken (post-guard) rather than the raw tr.RefreshToken,
+	// so a missing rotated token in the response never overwrites the stored one
+	// with an empty string (which would 401 every subsequent refresh).
+	h.pool.UpdateToken(account.ID, account.AccessToken, account.RefreshToken, expiresAt)
+	config.UpdateAccountToken(account.ID, account.AccessToken, account.RefreshToken, expiresAt)
 
 	return nil
 }
