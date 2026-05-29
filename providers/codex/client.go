@@ -16,7 +16,7 @@ import (
 const (
 	baseURL     = "https://chatgpt.com/backend-api/codex"
 	responsesEP = "/responses"
-	userAgent   = "codex_cli_rs/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9"
+	userAgent   = "codex_cli_rs/0.133.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9"
 )
 
 var httpClientStore atomic.Pointer[http.Client]

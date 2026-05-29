@@ -43,6 +43,7 @@ func GetUsage(accessToken, accountID string) (*CodexUsageResponse, error) {
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Originator", "codex_cli_rs")
 	if accountID != "" {
 		req.Header.Set("Chatgpt-Account-Id", accountID)
 	}

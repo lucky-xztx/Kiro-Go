@@ -13,7 +13,7 @@ const modelsURL = "https://chatgpt.com/backend-api/codex/models"
 // clientVersion is sent as the ?client_version= query param. It must match the
 // CLI version advertised in the User-Agent so the upstream returns the plan's
 // real model set rather than rejecting an unknown client.
-const clientVersion = "0.118.0"
+const clientVersion = "0.133.0"
 
 // CodexModel is a single entry returned by GET /backend-api/codex/models.
 type CodexModel struct {
@@ -36,6 +36,11 @@ func FetchCodexModels(accessToken, accountID string) ([]CodexModel, error) {
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", userAgent)
+	// Originator identifies the calling CLI. The Codex backend requires it on the
+	// models endpoint (the responses endpoint sets it too via applyCodexHeaders);
+	// omitting it makes chatgpt.com reject the request even with a valid token.
+	// Matches the canonical Codex CLI behavior (see CLIProxyAPI fetch_codex_models).
+	req.Header.Set("Originator", "codex_cli_rs")
 	if accountID != "" {
 		req.Header.Set("Chatgpt-Account-Id", accountID)
 	}
