@@ -73,6 +73,13 @@ func (h *Handler) fetchCodexAccountModels(account *config.Account) ([]ModelInfo,
 		return nil, fmt.Errorf("token refresh failed: %w", err)
 	}
 	raw, err := codex.FetchCodexModels(account.AccessToken, account.UserId)
+	if err != nil && pool.IsAuthFailure(err) {
+		// Access token rejected server-side despite locally-valid expiry.
+		if rErr := h.forceRefreshCodexToken(account); rErr != nil {
+			return nil, rErr
+		}
+		raw, err = codex.FetchCodexModels(account.AccessToken, account.UserId)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -273,8 +273,18 @@ func (h *Handler) refreshAllAccounts() {
 		if providers.Normalize(account.Upstream) == "codex" {
 			info, err := h.refreshCodexAccountInfo(account)
 			if err != nil {
-				logger.Warnf("[BackgroundRefresh] Codex info refresh failed for %s: %v", account.Email, err)
-				h.handleAccountFailure(account, err)
+				errMsg := err.Error()
+				if isReauthRequiredMessage(errMsg) {
+					// Permanent credential death (reused/revoked/invalid_grant): the user
+					// must re-import a fresh auth.json. Disabling the account here would
+					// just cause 503 on every request and confuse the operator. Log a clear
+					// warning instead and keep the account enabled so the admin can see it
+					// in the panel and act on it.
+					logger.Warnf("[BackgroundRefresh] Codex %s: credentials permanently expired, needs re-import: %v", account.Email, err)
+				} else {
+					logger.Warnf("[BackgroundRefresh] Codex info refresh failed for %s: %v", account.Email, err)
+					h.handleAccountFailure(account, err)
+				}
 				continue
 			}
 			config.UpdateAccountInfo(account.ID, *info)
