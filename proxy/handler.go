@@ -2298,6 +2298,7 @@ func (h *Handler) apiGetAccounts(w http.ResponseWriter, r *http.Request) {
 			"nickname":          a.Nickname,
 			"authMethod":        a.AuthMethod,
 			"provider":          a.Provider,
+			"upstream":          providers.Normalize(a.Upstream),
 			"region":            a.Region,
 			"enabled":           a.Enabled,
 			"banStatus":         a.BanStatus,

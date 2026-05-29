@@ -1075,12 +1075,13 @@
     const a = accountsData.find(x => x.id === id);
     if (!a) return;
     const idAttr = escapeAttr(id);
+    const isCodex = (a.upstream || '').toLowerCase() === 'codex';
     $('detailBody').innerHTML =
       '<div class="detail-section"><h4>' + escapeHtml(t('detail.basicInfo')) + '</h4><div class="detail-grid">' +
       detailItem(t('detail.email'), getDisplayEmail(a.email, null)) +
       detailItem(t('detail.userId'), a.userId || '-') +
-      detailItem(t('detail.authMethod'), formatAuthMethod(a.provider || a.authMethod)) +
-      detailItem(t('detail.region'), a.region || 'us-east-1') +
+      detailItem(t('detail.authMethod'), isCodex ? 'Codex (ChatGPT)' : formatAuthMethod(a.provider || a.authMethod)) +
+      (isCodex ? '' : detailItem(t('detail.region'), a.region || 'us-east-1')) +
       '</div></div>' +
 
       '<div class="detail-section"><h4>' + escapeHtml(t('detail.machineId')) + '</h4><div class="machine-id-row">' +
@@ -1097,13 +1098,16 @@
       '<button class="btn btn-sm btn-primary" data-detail-action="saveWeight" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.save')) + '</button>' +
       '</div>' +
 
-      '<div class="detail-section">' +
-      '<h4>' + escapeHtml(t('detail.overage')) +
-      ' <button class="btn btn-sm btn-outline" data-detail-action="refreshOverage" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.overageRefresh')) + '</button>' +
-      '</h4>' +
-      '<p class="help-block">' + escapeHtml(t('detail.overageHint')) + '</p>' +
-      renderOverageBlock(a, idAttr) +
-      '</div>' +
+      // Overages 是 AWS Q / Kiro 专属能力，Codex 账号不显示。
+      (isCodex ? '' : (
+        '<div class="detail-section">' +
+        '<h4>' + escapeHtml(t('detail.overage')) +
+        ' <button class="btn btn-sm btn-outline" data-detail-action="refreshOverage" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.overageRefresh')) + '</button>' +
+        '</h4>' +
+        '<p class="help-block">' + escapeHtml(t('detail.overageHint')) + '</p>' +
+        renderOverageBlock(a, idAttr) +
+        '</div>'
+      )) +
 
       '<div class="detail-section"><h4>' + escapeHtml(t('detail.proxyURL')) + '</h4><div class="machine-id-row">' +
       '<input type="text" id="proxyURLInput" value="' + escapeAttr(a.proxyURL || '') + '" placeholder="socks5://host:port" />' +
@@ -1113,7 +1117,10 @@
       '<div class="detail-section"><h4>' + escapeHtml(t('detail.subscription')) + '</h4><div class="detail-grid">' +
       detailItem(t('detail.subscriptionType'), a.subscriptionTitle || (a.subscriptionType ? formatSubscriptionLabel(a.subscriptionType) : '-')) +
       detailItem(t('detail.tokenExpiry'), a.expiresAt ? new Date(a.expiresAt * 1000).toLocaleString() : '-') +
-      detailItem(t('detail.mainQuota'), (a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0)) +
+      detailItem(isCodex ? '5h 用量' : t('detail.mainQuota'),
+        isCodex
+          ? ((a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + '%')
+          : ((a.usageCurrent != null ? a.usageCurrent.toFixed(1) : 0) + ' / ' + (a.usageLimit != null ? a.usageLimit.toFixed(0) : 0))) +
       detailItem(t('detail.resetDate'), a.nextResetDate || '-') +
       (a.trialUsageLimit > 0 ?
         detailItem(t('detail.trialQuota'), (a.trialUsageCurrent != null ? a.trialUsageCurrent.toFixed(1) : 0) + ' / ' + a.trialUsageLimit.toFixed(0)) +
@@ -1132,7 +1139,8 @@
       '<div class="detail-section">' +
       '<h4>' + escapeHtml(t('detail.models')) +
       ' <button class="btn btn-sm btn-outline" data-detail-action="loadModels" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.loadModels')) + '</button>' +
-      ' <button class="btn btn-sm btn-outline" data-detail-action="refreshModels" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.refreshModelCache')) + '</button>' +
+      // Codex 模型固定，无需路由缓存刷新（那个走 AWS）。
+      (isCodex ? '' : (' <button class="btn btn-sm btn-outline" data-detail-action="refreshModels" data-id="' + idAttr + '" type="button">' + escapeHtml(t('detail.refreshModelCache')) + '</button>')) +
       '</h4>' +
       '<div id="modelsList" class="model-list"></div>' +
       '</div>';
@@ -1140,22 +1148,28 @@
     openDialog('detailModal');
   }
   async function loadModels(id) {
+    const a = accountsData.find(x => x.id === id);
+    const isCodex = a && (a.upstream || '').toLowerCase() === 'codex';
     const c = $('modelsList');
     c.innerHTML = '<p class="empty-state">' + escapeHtml(t('detail.loading')) + '</p>';
     try {
-      const res = await api('/accounts/' + id + '/models');
+      // Codex 模型固定，用 cached 端点（返回字符串数组），不打 AWS。
+      const url = isCodex ? ('/accounts/' + id + '/models/cached') : ('/accounts/' + id + '/models');
+      const res = await api(url);
       const d = await res.json();
       if (d.success && d.models) {
-        const sorted = d.models.slice().sort((a, b) => {
-          if (a.modelId === 'auto') return -1;
-          if (b.modelId === 'auto') return 1;
-          return (a.rateMultiplier || 1) - (b.rateMultiplier || 1);
+        // 归一化：codex 返回 string[]，kiro 返回 object[]。
+        const norm = d.models.map(m => (typeof m === 'string' ? { modelId: m } : m));
+        const sorted = norm.slice().sort((x, y) => {
+          if (x.modelId === 'auto') return -1;
+          if (y.modelId === 'auto') return 1;
+          return (x.rateMultiplier || 1) - (y.rateMultiplier || 1);
         });
         c.innerHTML = sorted.map(m => {
           const ratio = m.rateMultiplier || 1;
           return '<div class="model-item">' +
             '<div class="model-name">' + escapeHtml(m.modelId) + '</div>' +
-            '<div class="model-credit"><span class="credit-ratio">' + escapeHtml(t('detail.creditMultiplier', ratio)) + '</span></div>' +
+            (isCodex ? '' : '<div class="model-credit"><span class="credit-ratio">' + escapeHtml(t('detail.creditMultiplier', ratio)) + '</span></div>') +
             '<div class="model-info">' + escapeHtml(m.description || '') + '</div>' +
             '</div>';
         }).join('') || '<p class="empty-state">' + escapeHtml(t('detail.noModels')) + '</p>';
