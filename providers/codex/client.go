@@ -85,6 +85,10 @@ type StreamEvent struct {
 type StreamCallback struct {
 	// OnEvent is called for every SSE event with the full parsed JSON object.
 	OnEvent func(eventType string, data json.RawMessage)
+	// OnHTTPStatus, if set, is called once with the raw upstream HTTP status
+	// code as soon as the response headers arrive (before the 200 check).
+	// Useful for surfacing the real chatgpt.com status in diagnostics.
+	OnHTTPStatus func(status int)
 }
 
 // CallCodexAPI sends a request to the Codex Responses API and processes the
@@ -108,6 +112,12 @@ func CallCodexAPI(accessToken, accountID string, req *CodexRequest, cb *StreamCa
 		return fmt.Errorf("codex request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	// Surface the real upstream HTTP status before any short-circuit so that
+	// diagnostics can prove the request actually reached chatgpt.com.
+	if cb != nil && cb.OnHTTPStatus != nil {
+		cb.OnHTTPStatus(resp.StatusCode)
+	}
 
 	if resp.StatusCode != 200 {
 		errBody, _ := io.ReadAll(resp.Body)

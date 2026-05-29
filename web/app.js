@@ -1425,8 +1425,19 @@
       const d = await res.json();
       if (d.success) {
         addTestLog(t('accounts.testLog.success', email, elapsed, d.reply), 'ok');
+        // 透出上游真实诊断信息，便于核实测试是否真的打到了 chatgpt.com
+        var diag = '上游 HTTP ' + (d.upstreamStatus != null ? d.upstreamStatus : '?') +
+          ' | SSE 事件数: ' + (d.eventCount != null ? d.eventCount : '?');
+        addTestLog(diag, 'info');
+        if (d.firstEvent) {
+          addTestLog('首个事件: ' + d.firstEvent, 'info');
+        }
       } else {
-        addTestLog(t('accounts.testLog.failed', email, elapsed, d.error || t('common.unknownError')), 'err');
+        var failMsg = d.error || t('common.unknownError');
+        if (d.upstreamStatus != null && d.upstreamStatus !== 0) {
+          failMsg = '上游 HTTP ' + d.upstreamStatus + ' | ' + failMsg;
+        }
+        addTestLog(t('accounts.testLog.failed', email, elapsed, failMsg), 'err');
       }
     } catch (e) {
       addTestLog(t('accounts.testLog.error', email, e.message), 'err');

@@ -3174,8 +3174,22 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 		codexReq.Store = &storeFalse
 		codexReq.Include = nil
 		var content string
+		var upstreamStatus int
+		var eventCount int
+		var firstEvent string
 		cb := &codex.StreamCallback{
+			OnHTTPStatus: func(status int) {
+				upstreamStatus = status
+			},
 			OnEvent: func(eventType string, data json.RawMessage) {
+				eventCount++
+				if firstEvent == "" {
+					snippet := string(data)
+					if len(snippet) > 200 {
+						snippet = snippet[:200]
+					}
+					firstEvent = snippet
+				}
 				if eventType == "response.output_text.delta" {
 					var evt struct {
 						Delta string `json:"delta"`
@@ -3188,13 +3202,19 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 		}
 		if err := codex.CallCodexAPI(account.AccessToken, account.UserId, codexReq, cb); err != nil {
 			w.WriteHeader(500)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":          err.Error(),
+				"upstreamStatus": upstreamStatus,
+			})
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"reply":   content,
-			"model":   model,
+			"success":        true,
+			"reply":          content,
+			"model":          model,
+			"upstreamStatus": upstreamStatus,
+			"eventCount":     eventCount,
+			"firstEvent":     firstEvent,
 		})
 		return
 	}
