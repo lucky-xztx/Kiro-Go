@@ -26,9 +26,12 @@ type CodexRateLimit struct {
 }
 
 // CodexRateWindow is one time-window in a rate limit.
+// used_percent is returned by the upstream as a number in [0, 100] (NOT 0-1).
 type CodexRateWindow struct {
 	LimitWindowSeconds int     `json:"limit_window_seconds"`
 	UsedPercent        float64 `json:"used_percent"`
+	ResetAt            int64   `json:"reset_at,omitempty"`
+	ResetAfterSeconds  int64   `json:"reset_after_seconds,omitempty"`
 }
 
 // GetUsage calls the ChatGPT wham/usage endpoint for the given account.
@@ -64,17 +67,15 @@ func GetUsage(accessToken, accountID string) (*CodexUsageResponse, error) {
 
 // RefreshCodexAccountInfo fetches usage/quota info for a Codex account and
 // maps it to the unified AccountInfo struct used by the admin panel.
+//
+// Note: this does NOT touch Email or UserId — those fields are extracted
+// from the id_token at import time. The access_token is opaque, parsing
+// it as a JWT yields garbage and would overwrite the persisted id_token
+// claims with each refresh. Leaving info.Email/info.UserId empty causes
+// config.UpdateAccountInfo to keep the existing values.
 func RefreshCodexAccountInfo(accessToken, refreshToken, accountID string) (*config.AccountInfo, error) {
 	info := &config.AccountInfo{
 		LastRefresh: time.Now().Unix(),
-	}
-
-	// Extract email and userId from the access token JWT.
-	if email, err := ExtractEmail(accessToken); err == nil && email != "" {
-		info.Email = email
-	}
-	if uid, err := ExtractAccountID(accessToken); err == nil && uid != "" {
-		info.UserId = uid
 	}
 
 	usage, err := GetUsage(accessToken, accountID)
@@ -86,10 +87,14 @@ func RefreshCodexAccountInfo(accessToken, refreshToken, accountID string) (*conf
 	info.SubscriptionTitle = formatPlanTitle(usage.PlanType)
 
 	if usage.RateLimit != nil && usage.RateLimit.PrimaryWindow != nil {
+		// upstream `used_percent` is a 0-100 number; mirror that into
+		// usageCurrent (so the existing 0-100 display works) and store
+		// the 0.0-1.0 fractional form in usagePercent for compatibility
+		// with renderers that scale it back.
 		pct := usage.RateLimit.PrimaryWindow.UsedPercent
-		info.UsagePercent = pct
-		info.UsageCurrent = pct * 100
+		info.UsageCurrent = pct
 		info.UsageLimit = 100
+		info.UsagePercent = pct / 100
 	}
 
 	return info, nil

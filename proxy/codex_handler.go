@@ -767,42 +767,117 @@ func (h *Handler) handleCodexResponsesStream(
 	h.sendOpenAIError(w, 502, "server_error", errMsg)
 }
 
-// apiImportCodexAccount imports a ChatGPT Codex account using a refresh_token.
+// apiImportCodexAccount imports a ChatGPT Codex account.
+//
+// Accepts two payload shapes:
+//
+//  1. Refresh-token-only: {"refreshToken": "..."}
+//     Uses the refresh token to obtain a fresh access_token + id_token, then
+//     extracts email + chatgpt_account_id from the id_token claims.
+//
+//  2. Codex CLI auth.json blob:
+//     {
+//     "OPENAI_API_KEY": "...",        // optional
+//     "tokens": {
+//     "access_token":  "...",
+//     "id_token":      "...",
+//     "refresh_token": "...",
+//     "account_id":    "..."         // optional, falls back to id_token claim
+//     },
+//     "last_refresh": "2026-..."        // optional, ignored
+//     }
+//     Imports the tokens directly without an upfront refresh round-trip.
+//     Field names accept both snake_case and camelCase.
 func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		RefreshToken string `json:"refreshToken"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
-	if req.RefreshToken == "" {
+
+	var (
+		accessToken  string
+		idToken      string
+		refreshToken string
+		accountID    string
+		expiresIn    int = 3600
+	)
+
+	// Try auth.json blob shape first (presence of "tokens" object).
+	if tokensRaw, ok := raw["tokens"]; ok {
+		var tokens struct {
+			AccessToken     string `json:"access_token"`
+			AccessTokenAlt  string `json:"accessToken"`
+			IDToken         string `json:"id_token"`
+			IDTokenAlt      string `json:"idToken"`
+			RefreshToken    string `json:"refresh_token"`
+			RefreshTokenAlt string `json:"refreshToken"`
+			AccountID       string `json:"account_id"`
+			AccountIDAlt    string `json:"accountId"`
+		}
+		if err := json.Unmarshal(tokensRaw, &tokens); err != nil {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid tokens object: " + err.Error()})
+			return
+		}
+		accessToken = firstNonEmpty(tokens.AccessToken, tokens.AccessTokenAlt)
+		idToken = firstNonEmpty(tokens.IDToken, tokens.IDTokenAlt)
+		refreshToken = firstNonEmpty(tokens.RefreshToken, tokens.RefreshTokenAlt)
+		accountID = firstNonEmpty(tokens.AccountID, tokens.AccountIDAlt)
+	}
+
+	// Fallback to the legacy refresh-token-only shape.
+	if accessToken == "" && refreshToken == "" {
+		var legacy struct {
+			RefreshToken    string `json:"refresh_token"`
+			RefreshTokenAlt string `json:"refreshToken"`
+		}
+		body, _ := json.Marshal(raw)
+		_ = json.Unmarshal(body, &legacy)
+		refreshToken = firstNonEmpty(legacy.RefreshToken, legacy.RefreshTokenAlt)
+	}
+
+	if refreshToken == "" {
 		w.WriteHeader(400)
-		json.NewEncoder(w).Encode(map[string]string{"error": "refreshToken is required"})
+		json.NewEncoder(w).Encode(map[string]string{"error": "refresh_token is required (either top-level or under tokens.{refresh_token,refreshToken})"})
 		return
 	}
 
-	tr, err := codex.RefreshTokens(req.RefreshToken)
-	if err != nil {
-		w.WriteHeader(400)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
-		return
+	// If we don't have a usable access_token+id_token from the blob, do a refresh
+	// to obtain a fresh pair. This also implicitly validates the refresh_token.
+	if accessToken == "" || idToken == "" {
+		tr, err := codex.RefreshTokens(refreshToken)
+		if err != nil {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
+			return
+		}
+		accessToken = tr.AccessToken
+		idToken = tr.IDToken
+		if tr.RefreshToken != "" {
+			refreshToken = tr.RefreshToken
+		}
+		if tr.ExpiresIn > 0 {
+			expiresIn = tr.ExpiresIn
+		}
 	}
 
-	accountID := ""
 	email := ""
-	if tr.IDToken != "" {
-		accountID, _ = codex.ExtractAccountID(tr.IDToken)
+	if idToken != "" {
+		email, _ = codex.ExtractEmail(idToken)
+		if accountID == "" {
+			accountID, _ = codex.ExtractAccountID(idToken)
+		}
 	}
 
-	expiresAt := time.Now().Unix() + int64(tr.ExpiresIn) - 60
+	expiresAt := time.Now().Unix() + int64(expiresIn) - 60
 
 	account := config.Account{
 		ID:           config.GenerateMachineId(),
 		Email:        email,
-		AccessToken:  tr.AccessToken,
-		RefreshToken: tr.RefreshToken,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
 		AuthMethod:   "codex",
 		Provider:     "codex",
 		Upstream:     "codex",
@@ -825,10 +900,20 @@ func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"account": map[string]interface{}{
-			"id":    account.ID,
-			"email": email,
+			"id":        account.ID,
+			"email":     email,
+			"accountId": accountID,
 		},
 	})
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // ==================== Codex OAuth Session Store ====================

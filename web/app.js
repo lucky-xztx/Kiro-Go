@@ -2197,7 +2197,9 @@
     body.innerHTML =
       '<p class="help-block">' + escapeHtml(t('codex.refreshTokenHint')) + '</p>' +
       '<div class="form-group"><label>' + escapeHtml(t('codex.refreshTokenLabel')) + '</label>' +
-      '<textarea id="codexRefreshToken" rows="3" placeholder="' + escapeAttr(t('codex.refreshTokenPlaceholder')) + '"></textarea></div>' +
+      '<textarea id="codexRefreshToken" rows="6" placeholder="' + escapeAttr(t('codex.refreshTokenPlaceholder')) + '"></textarea>' +
+      '<p class="text-xs muted-line mt-1">支持两种格式：① 直接粘贴 refresh_token；② 粘贴 Codex CLI auth.json 全文（包含 tokens.access_token / id_token / refresh_token / account_id）</p>' +
+      '</div>' +
       '<div class="modal-footer">' +
       '<button class="btn btn-secondary" data-modal-goto="add" type="button">' + escapeHtml(t('common.back')) + '</button>' +
       '<button class="btn btn-primary" id="importCodexTokenBtn" type="button">' + escapeHtml(t('common.import')) + '</button>' +
@@ -2207,7 +2209,21 @@
       if (!token || !token.value.trim()) { alert(t('codex.refreshTokenRequired')); return; }
       var btn = this;
       btn.disabled = true; btn.textContent = t('common.loading');
-      api('/auth/codex-import', { method: 'POST', body: JSON.stringify({ refreshToken: token.value.trim() }) })
+      var raw = token.value.trim();
+      var payload;
+      if (raw.charAt(0) === '{') {
+        try {
+          var parsed = JSON.parse(raw);
+          payload = JSON.stringify(parsed);
+        } catch (e) {
+          alert('Invalid JSON: ' + e.message);
+          btn.disabled = false; btn.textContent = t('common.import');
+          return;
+        }
+      } else {
+        payload = JSON.stringify({ refreshToken: raw });
+      }
+      api('/auth/codex-import', { method: 'POST', body: payload })
         .then(function(r) { return r.json(); })
         .then(function(res) {
           if (res.success) {
