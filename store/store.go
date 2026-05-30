@@ -635,7 +635,6 @@ func PurgeExpiredSessions() error {
 	return err
 }
 
-
 // GenerateApiKeyValue 生成新的 sk-<hex> 格式令牌。
 func GenerateApiKeyValue() string {
 	buf := make([]byte, 32)
