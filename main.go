@@ -1,16 +1,16 @@
-// Package main provides the entry point for Kiro API Proxy.
+// Package main 是 Kiro API Proxy 的入口。
 //
-// Kiro API Proxy is a reverse proxy service that translates Kiro API requests
-// into OpenAI and Anthropic (Claude) compatible formats. Key features include:
-//   - Multi-account pool with round-robin load balancing
-//   - Automatic OAuth token refresh
-//   - Streaming response support for real-time AI interactions
-//   - Admin panel for account and configuration management
+// Kiro API Proxy 是一个反向代理服务，将 Kiro API 请求转换为
+// OpenAI 和 Anthropic (Claude) 兼容格式。主要功能：
+//   - 多账号池，轮询负载均衡
+//   - 自动 OAuth Token 刷新
+//   - SSE 流式响应，支持实时 AI 交互
+//   - Web 管理面板，管理账号和配置
 //
-// The service exposes the following endpoints:
-//   - /v1/messages - Claude API compatible endpoint
-//   - /v1/chat/completions - OpenAI API compatible endpoint
-//   - /admin - Web-based administration panel
+// 暴露的端点：
+//   - /v1/messages - Claude API 兼容端点
+//   - /v1/chat/completions - OpenAI API 兼容端点
+//   - /admin - Web 管理面板
 package main
 
 import (
@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Initialize log level: LOG_LEVEL env var takes priority over config, defaulting to "info".
+	// 初始化日志级别：LOG_LEVEL 环境变量优先于配置文件，默认 "info"
 	logger.Init(config.GetLogLevel())
 
 	// 环境变量覆盖密码
@@ -112,9 +112,8 @@ func main() {
 	logger.Infof("Claude API: http://%s/v1/messages", addr)
 	logger.Infof("OpenAI API: http://%s/v1/chat/completions", addr)
 
-	// WriteTimeout intentionally 0: SSE streams can run for minutes while the
-	// upstream model produces tokens. ReadHeaderTimeout + ReadTimeout still
-	// guard against slowloris-style header/body stalls.
+	// WriteTimeout 故意设为 0：SSE 流可能持续数分钟，等待上游模型产出 token。
+	// ReadHeaderTimeout + ReadTimeout 仍然可以防止 slowloris 式的头部/请求体阻塞。
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           handler,
@@ -123,8 +122,7 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Run the server in the background so the main goroutine can wait for an
-	// OS signal and shut down gracefully (flushing pending statistics).
+	// 在后台运行服务器，主 goroutine 等待 OS 信号并优雅关闭（刷新统计等）
 	serverErr := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -140,8 +138,10 @@ func main() {
 		logger.Fatalf("Server failed: %v", err)
 	case sig := <-stop:
 		logger.Infof("Received %s, shutting down...", sig)
-		// Persist stats and stop background loops before exiting.
 		handler.Shutdown()
+		if err := store.Close(); err != nil {
+			logger.Warnf("Close store: %v", err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := srv.Shutdown(ctx); err != nil {

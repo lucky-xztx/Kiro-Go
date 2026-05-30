@@ -1,10 +1,10 @@
-// Package store provides SQLite-backed persistence for user accounts,
-// per-user API keys, and login sessions.
+// Package store 提供 SQLite 持久化存储，管理用户账号、
+// 用户 API Key 和登录会话。
 //
-// The Kiro upstream account pool and global server settings still live in
-// data/config.json — this package only owns user-facing identity data.
+// Kiro 上游账号池和全局服务设置仍在 data/config.json 中，
+// 本包只负责面向用户的身份数据。
 //
-// Driver: modernc.org/sqlite (pure Go, no CGO).
+// 驱动：modernc.org/sqlite（纯 Go，无需 CGO）。
 package store
 
 import (
@@ -22,19 +22,19 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// User represents a registered user account.
+// User 表示一个注册用户。
 type User struct {
 	ID           string `json:"id"`
 	Username     string `json:"username"`
 	Email        string `json:"email,omitempty"`
 	PasswordHash string `json:"-"`
-	Role         string `json:"role"` // "admin" or "user"
+	Role         string `json:"role"` // "admin" 或 "user"
 	Enabled      bool   `json:"enabled"`
 	CreatedAt    int64  `json:"createdAt"`
 	UpdatedAt    int64  `json:"updatedAt"`
 }
 
-// UserApiKey represents one API key issued to a user.
+// UserApiKey 表示颁发给用户的单个 API Key。
 type UserApiKey struct {
 	ID            string  `json:"id"`
 	UserID        string  `json:"userId"`
@@ -50,7 +50,7 @@ type UserApiKey struct {
 	RequestsCount int64   `json:"requestsCount"`
 }
 
-// Session is a server-side session record bound to a cookie value.
+// Session 是绑定到 cookie 的服务端会话记录。
 type Session struct {
 	Token     string
 	UserID    string
@@ -62,30 +62,29 @@ var (
 	db   *sql.DB
 	once sync.Once
 
-	// ErrNotFound is returned when a row lookup misses.
+	// ErrNotFound 在查询不到记录时返回。
 	ErrNotFound = errors.New("not found")
-	// ErrConflict is returned for unique-constraint violations the caller can
-	// translate into "already exists" messages.
+	// ErrConflict 在唯一约束冲突时返回，调用方可转换为"已存在"提示。
 	ErrConflict = errors.New("conflict")
 )
 
 const (
-	sessionTTL = 30 * 24 * time.Hour // 30 days
+	sessionTTL = 30 * 24 * time.Hour // 30 天
 )
 
-// Init opens (or creates) the SQLite database at path and applies the schema.
-// Safe to call multiple times — only the first invocation does the work.
+// Init 打开（或创建）指定路径的 SQLite 数据库并应用表结构。
+// 可安全多次调用，只有首次调用会执行初始化。
 func Init(path string) error {
 	var initErr error
 	once.Do(func() {
-		// _pragma options ensure WAL + foreign keys at connection time.
+		// _pragma 选项在连接时启用 WAL 模式、外键约束
 		dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)", path)
 		conn, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			initErr = fmt.Errorf("open sqlite: %w", err)
 			return
 		}
-		// SQLite handles concurrency at the file level; a small pool is plenty.
+		// SQLite 在文件级别处理并发，小连接池即可
 		conn.SetMaxOpenConns(4)
 		conn.SetMaxIdleConns(2)
 		conn.SetConnMaxIdleTime(5 * time.Minute)
@@ -103,7 +102,16 @@ func Init(path string) error {
 	return initErr
 }
 
-// DB returns the underlying *sql.DB. Mostly useful for tests.
+// Close 释放 SQLite 连接池。
+// 在优雅关闭时调用，确保 WAL 文件被正确刷盘。
+func Close() error {
+	if db != nil {
+		return db.Close()
+	}
+	return nil
+}
+
+// DB 返回底层的 *sql.DB，主要用于测试。
 func DB() *sql.DB { return db }
 
 func applySchema(conn *sql.DB) error {
@@ -203,8 +211,8 @@ func firstLine(s string) string {
 
 // ====================== Users ======================
 
-// CreateUser inserts a new user with a bcrypt-hashed password.
-// Returns ErrConflict on duplicate username.
+// CreateUser 插入新用户，密码使用 bcrypt 哈希。
+// 用户名重复时返回 ErrConflict。
 func CreateUser(username, email, password, role string) (*User, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
@@ -245,7 +253,7 @@ func CreateUser(username, email, password, role string) (*User, error) {
 	return u, nil
 }
 
-// GetUserByUsername returns the user (case-insensitive match) or ErrNotFound.
+// GetUserByUsername 按用户名查找（不区分大小写），未找到返回 ErrNotFound。
 func GetUserByUsername(username string) (*User, error) {
 	if db == nil {
 		return nil, ErrNotFound
@@ -258,7 +266,7 @@ func GetUserByUsername(username string) (*User, error) {
 	return scanUser(row)
 }
 
-// GetUserByID returns the user with the given ID or ErrNotFound.
+// GetUserByID 按 ID 查找用户，未找到返回 ErrNotFound。
 func GetUserByID(id string) (*User, error) {
 	if db == nil {
 		return nil, ErrNotFound
@@ -271,7 +279,7 @@ func GetUserByID(id string) (*User, error) {
 	return scanUser(row)
 }
 
-// ListUsers returns all users, newest first.
+// ListUsers 返回所有用户，按创建时间倒序。
 func ListUsers() ([]User, error) {
 	rows, err := db.Query(
 		`SELECT id, username, IFNULL(email,''), password_hash, role, enabled, created_at, updated_at
@@ -292,14 +300,14 @@ func ListUsers() ([]User, error) {
 	return out, rows.Err()
 }
 
-// UserCount returns the number of registered users.
+// UserCount 返回注册用户总数。
 func UserCount() (int, error) {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&n)
 	return n, err
 }
 
-// UpdateUserPassword replaces the bcrypt hash for the given user ID.
+// UpdateUserPassword 替换指定用户的 bcrypt 密码哈希。
 func UpdateUserPassword(id, newPassword string) error {
 	if len(newPassword) < 6 {
 		return errors.New("password must be at least 6 characters")
@@ -321,7 +329,7 @@ func UpdateUserPassword(id, newPassword string) error {
 	return nil
 }
 
-// SetUserEnabled toggles a user account.
+// SetUserEnabled 切换用户账号启用状态。
 func SetUserEnabled(id string, enabled bool) error {
 	res, err := db.Exec(
 		`UPDATE users SET enabled = ?, updated_at = ? WHERE id = ?`,
@@ -336,7 +344,7 @@ func SetUserEnabled(id string, enabled bool) error {
 	return nil
 }
 
-// SetUserRole changes admin/user role.
+// SetUserRole 修改用户角色（admin/user）。
 func SetUserRole(id, role string) error {
 	if role != "admin" && role != "user" {
 		return errors.New("role must be 'admin' or 'user'")
@@ -354,14 +362,14 @@ func SetUserRole(id, role string) error {
 	return nil
 }
 
-// DeleteUser removes the user and (via FK cascade) all their api keys + sessions.
+// DeleteUser 删除用户，其 API Key 和会话通过外键级联删除。
 func DeleteUser(id string) error {
 	_, err := db.Exec(`DELETE FROM users WHERE id = ?`, id)
 	return err
 }
 
-// VerifyPassword returns the user when (username, password) matches and the
-// account is enabled. Constant-time bcrypt comparison.
+// VerifyPassword 验证用户名和密码，匹配且账号启用时返回用户。
+// 使用常量时间 bcrypt 比较，防止时序攻击。
 func VerifyPassword(username, password string) (*User, error) {
 	u, err := GetUserByUsername(username)
 	if err != nil {
@@ -378,8 +386,8 @@ func VerifyPassword(username, password string) (*User, error) {
 
 // ====================== API Keys ======================
 
-// CreateApiKey issues a new key for the given user.
-// If keyValue is empty, a fresh sk-<hex> token is generated.
+// CreateApiKey 为指定用户颁发新 API Key。
+// 如果 keyValue 为空，自动生成 sk-<hex> 格式的令牌。
 func CreateApiKey(userID, name, keyValue string, tokenLimit int64, creditLimit float64) (*UserApiKey, error) {
 	if userID == "" {
 		return nil, errors.New("userID is required")
@@ -412,7 +420,7 @@ func CreateApiKey(userID, name, keyValue string, tokenLimit int64, creditLimit f
 	return k, nil
 }
 
-// ListApiKeysForUser returns every key owned by userID, newest first.
+// ListApiKeysForUser 返回指定用户的所有 Key，按创建时间倒序。
 func ListApiKeysForUser(userID string) ([]UserApiKey, error) {
 	rows, err := db.Query(
 		`SELECT id, user_id, IFNULL(name,''), key, enabled, created_at, IFNULL(last_used_at,0),
@@ -435,7 +443,7 @@ func ListApiKeysForUser(userID string) ([]UserApiKey, error) {
 	return out, rows.Err()
 }
 
-// ListAllApiKeys returns all user-issued keys (admin view).
+// ListAllApiKeys 返回所有用户颁发的 Key（管理员视图）。
 func ListAllApiKeys() ([]UserApiKey, error) {
 	if db == nil {
 		return nil, nil
@@ -460,7 +468,7 @@ func ListAllApiKeys() ([]UserApiKey, error) {
 	return out, rows.Err()
 }
 
-// FindApiKeyByValue returns the key whose value exactly matches.
+// FindApiKeyByValue 按精确值查找 API Key。
 func FindApiKeyByValue(key string) (*UserApiKey, error) {
 	if key == "" || db == nil {
 		return nil, ErrNotFound
@@ -474,7 +482,7 @@ func FindApiKeyByValue(key string) (*UserApiKey, error) {
 	return scanApiKey(row)
 }
 
-// GetApiKeyByID returns the key by primary id.
+// GetApiKeyByID 按主键 ID 查找 API Key。
 func GetApiKeyByID(id string) (*UserApiKey, error) {
 	if db == nil {
 		return nil, ErrNotFound
@@ -488,8 +496,8 @@ func GetApiKeyByID(id string) (*UserApiKey, error) {
 	return scanApiKey(row)
 }
 
-// UpdateApiKey patches mutable fields. Set name/limits as desired; nil pointers
-// mean "leave alone".
+// UpdateApiKey 局部更新 API Key 的可变字段。
+// nil 指针表示"不修改该字段"。
 func UpdateApiKey(id string, name *string, enabled *bool, tokenLimit *int64, creditLimit *float64) error {
 	sets := []string{}
 	args := []interface{}{}
@@ -524,13 +532,13 @@ func UpdateApiKey(id string, name *string, enabled *bool, tokenLimit *int64, cre
 	return nil
 }
 
-// DeleteApiKey removes the key.
+// DeleteApiKey 删除指定的 API Key。
 func DeleteApiKey(id string) error {
 	_, err := db.Exec(`DELETE FROM user_api_keys WHERE id = ?`, id)
 	return err
 }
 
-// RecordApiKeyUsage atomically increments counters after a successful proxied request.
+// RecordApiKeyUsage 在代理请求成功后原子递增计数器。
 func RecordApiKeyUsage(id string, tokens int64, credits float64) error {
 	_, err := db.Exec(
 		`UPDATE user_api_keys
@@ -544,7 +552,7 @@ func RecordApiKeyUsage(id string, tokens int64, credits float64) error {
 	return err
 }
 
-// ResetApiKeyUsage clears counters but keeps the key.
+// ResetApiKeyUsage 清零计数器，保留 Key。
 func ResetApiKeyUsage(id string) error {
 	_, err := db.Exec(
 		`UPDATE user_api_keys SET tokens_used = 0, credits_used = 0, requests_count = 0 WHERE id = ?`,
@@ -553,7 +561,7 @@ func ResetApiKeyUsage(id string) error {
 	return err
 }
 
-// ApiKeyOverLimit reports whether the key has exhausted any non-zero limit.
+// ApiKeyOverLimit 检查 Key 是否已超出任一非零额度限制。
 func ApiKeyOverLimit(k UserApiKey) (overToken, overCredit bool) {
 	if k.TokenLimit > 0 && k.TokensUsed >= k.TokenLimit {
 		overToken = true
@@ -566,7 +574,7 @@ func ApiKeyOverLimit(k UserApiKey) (overToken, overCredit bool) {
 
 // ====================== Sessions ======================
 
-// CreateSession issues a new opaque token bound to userID.
+// CreateSession 为指定用户创建新的会话令牌。
 func CreateSession(userID string) (*Session, error) {
 	tok := newToken(32)
 	now := time.Now()
@@ -586,7 +594,7 @@ func CreateSession(userID string) (*Session, error) {
 	return s, nil
 }
 
-// LookupSession returns the session if it exists and is unexpired, plus the user.
+// LookupSession 查找会话，若存在且未过期则返回会话和关联用户。
 func LookupSession(token string) (*Session, *User, error) {
 	if token == "" || db == nil {
 		return nil, nil, ErrNotFound
@@ -615,28 +623,27 @@ func LookupSession(token string) (*Session, *User, error) {
 	return &s, u, nil
 }
 
-// DeleteSession removes a session token.
+// DeleteSession 删除指定的会话令牌。
 func DeleteSession(token string) error {
 	_, err := db.Exec(`DELETE FROM sessions WHERE token = ?`, token)
 	return err
 }
 
-// PurgeExpiredSessions removes all rows whose expires_at is in the past.
+// PurgeExpiredSessions 清除所有已过期的会话。
 func PurgeExpiredSessions() error {
 	_, err := db.Exec(`DELETE FROM sessions WHERE expires_at < ?`, time.Now().Unix())
 	return err
 }
 
-// ====================== Helpers ======================
 
-// GenerateApiKeyValue returns a fresh sk-<hex> token.
+// GenerateApiKeyValue 生成新的 sk-<hex> 格式令牌。
 func GenerateApiKeyValue() string {
 	buf := make([]byte, 32)
 	_, _ = rand.Read(buf)
 	return "sk-" + hex.EncodeToString(buf)
 }
 
-// MaskApiKey produces a display-friendly masked version.
+// MaskApiKey 生成用于展示的脱敏版本。
 func MaskApiKey(key string) string {
 	if key == "" {
 		return ""
@@ -647,8 +654,7 @@ func MaskApiKey(key string) string {
 	return key[:6] + "****" + key[len(key)-4:]
 }
 
-// ConstantTimeEqual is a small helper for callers that want to compare opaque
-// tokens defensively.
+// ConstantTimeEqual 用于安全比较不透明令牌，防止时序攻击。
 func ConstantTimeEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
