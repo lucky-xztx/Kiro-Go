@@ -895,7 +895,7 @@ func (h *Handler) handleCodexResponsesStream(
 func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) {
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
@@ -921,7 +921,7 @@ func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) 
 			AccountIDAlt    string `json:"accountId"`
 		}
 		if err := json.Unmarshal(tokensRaw, &tokens); err != nil {
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Invalid tokens object: " + err.Error()})
 			return
 		}
@@ -943,7 +943,7 @@ func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if refreshToken == "" {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "refresh_token is required (either top-level or under tokens.{refresh_token,refreshToken})"})
 		return
 	}
@@ -953,7 +953,7 @@ func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) 
 	if accessToken == "" || idToken == "" {
 		tr, err := codex.RefreshTokens(refreshToken)
 		if err != nil {
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": "Token refresh failed: " + err.Error()})
 			return
 		}
@@ -992,7 +992,7 @@ func (h *Handler) apiImportCodexAccount(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := config.AddAccount(account); err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -1089,14 +1089,14 @@ func createCodexAccountFromTokens(tr *codex.TokenResponse) (*config.Account, err
 func (h *Handler) apiCodexOAuthStart(w http.ResponseWriter, r *http.Request) {
 	pkce, err := codex.GeneratePKCE()
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "PKCE generation failed"})
 		return
 	}
 
 	state, err := codex.GenerateState()
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "State generation failed"})
 		return
 	}
@@ -1119,7 +1119,7 @@ func (h *Handler) apiCodexOAuthCallback(w http.ResponseWriter, r *http.Request) 
 		CallbackURL string `json:"callbackUrl"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
@@ -1132,35 +1132,35 @@ func (h *Handler) apiCodexOAuthCallback(w http.ResponseWriter, r *http.Request) 
 		var err error
 		code, state, err = codex.ParseCallbackURL(req.CallbackURL)
 		if err != nil {
-			w.WriteHeader(400)
+			w.WriteHeader(http.StatusBadRequest)
 			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 			return
 		}
 	}
 
 	if code == "" || state == "" {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "code and state are required"})
 		return
 	}
 
 	codeVerifier, ok := popCodexOAuthSession(state)
 	if !ok {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid or expired OAuth session (state mismatch). Please try again."})
 		return
 	}
 
 	tr, err := codex.ExchangeCode(code, codeVerifier)
 	if err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Token exchange failed: " + err.Error()})
 		return
 	}
 
 	account, err := createCodexAccountFromTokens(tr)
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -1183,7 +1183,7 @@ func (h *Handler) apiCodexOAuthCallback(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) apiCodexDeviceStart(w http.ResponseWriter, r *http.Request) {
 	dcr, err := codex.StartDeviceCodeFlow()
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -1204,19 +1204,19 @@ func (h *Handler) apiCodexDevicePoll(w http.ResponseWriter, r *http.Request) {
 		UserCode     string `json:"userCode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
 		return
 	}
 	if req.DeviceAuthID == "" || req.UserCode == "" {
-		w.WriteHeader(400)
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "deviceAuthId and userCode are required"})
 		return
 	}
 
 	result, err := codex.PollDeviceCode(req.DeviceAuthID, req.UserCode)
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
@@ -1232,7 +1232,7 @@ func (h *Handler) apiCodexDevicePoll(w http.ResponseWriter, r *http.Request) {
 
 	account, err := createCodexAccountFromTokens(result.TR)
 	if err != nil {
-		w.WriteHeader(500)
+		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}

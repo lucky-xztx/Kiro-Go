@@ -6,13 +6,12 @@ import (
 	"time"
 )
 
-// EnsureAdmin makes sure the `admin` user exists with role=admin. On first
-// launch (or any later launch where the row is missing), it creates the user
-// with the supplied password (typically the legacy config.json admin password).
+// EnsureAdmin 确保 `admin` 用户存在且角色为 admin。
+// 首次启动（或后续 admin 行缺失时），使用提供的密码创建该用户
+// （通常是旧版 config.json 中的管理员密码）。
 //
-// If a user named `admin` already exists but with the wrong role/disabled flag,
-// this re-promotes them. If neither `admin` nor any admin role exists, the
-// oldest existing user is promoted.
+// 如果名为 `admin` 的用户已存在但角色/启用状态不正确，会重新提升。
+// 如果既没有 `admin` 用户也没有任何 admin 角色，则提升最早创建的用户。
 func EnsureAdmin(defaultPassword string) (*User, error) {
 	if u, err := GetUserByUsername("admin"); err == nil {
 		if u.Role != "admin" {
@@ -31,8 +30,7 @@ func EnsureAdmin(defaultPassword string) (*User, error) {
 		password = "admin123"
 	}
 	if len(password) < 6 {
-		// Pad short legacy passwords so bcrypt accepts them. Operators can
-		// rotate via the UI afterwards.
+		// 短密码补位以满足 bcrypt 最小长度要求，操作员可通过 UI 后续修改
 		password = password + "kiro!!"
 	}
 	if u, err := CreateUser("admin", "", password, "admin"); err == nil {
@@ -41,7 +39,7 @@ func EnsureAdmin(defaultPassword string) (*User, error) {
 		return nil, err
 	}
 
-	// Conflict path: someone created `admin` between our checks. Re-fetch.
+	// 冲突路径：在检查之间有人创建了 `admin`，重新获取
 	if u, err := GetUserByUsername("admin"); err == nil {
 		if u.Role != "admin" {
 			_ = SetUserRole(u.ID, "admin")
@@ -50,13 +48,13 @@ func EnsureAdmin(defaultPassword string) (*User, error) {
 		return u, nil
 	}
 
-	// Last resort: promote oldest user.
+	// 最后手段：提升最早创建的用户
 	users, err := ListUsers()
 	if err != nil {
 		return nil, err
 	}
 	if len(users) == 0 {
-		return nil, errors.New("no users available to promote")
+		return nil, errors.New("没有可提升的用户")
 	}
 	oldest := users[len(users)-1]
 	if err := SetUserRole(oldest.ID, "admin"); err != nil {
@@ -66,9 +64,7 @@ func EnsureAdmin(defaultPassword string) (*User, error) {
 	return &oldest, nil
 }
 
-// MigrateLegacyApiKeys imports a list of legacy config-level keys, attaching
-// each one to the given owner. Existing rows (matched by Key value) are left
-// alone. Returns the count of new rows inserted.
+// LegacyApiKey 表示旧版 config 级别的 API Key，用于迁移。
 type LegacyApiKey struct {
 	ID            string
 	Name          string
@@ -83,6 +79,8 @@ type LegacyApiKey struct {
 	RequestsCount int64
 }
 
+// MigrateLegacyApiKeys 导入旧版 config 级别的 Key 列表，将其关联到指定用户。
+// 已存在的 Key（按值匹配）会被跳过。返回新插入的行数。
 func MigrateLegacyApiKeys(ownerID string, legacy []LegacyApiKey) (int, error) {
 	if ownerID == "" || len(legacy) == 0 {
 		return 0, nil
@@ -93,7 +91,7 @@ func MigrateLegacyApiKeys(ownerID string, legacy []LegacyApiKey) (int, error) {
 		if key == "" {
 			continue
 		}
-		// Skip if a key with this value is already in the table.
+		// 跳过已存在于数据库中的 Key
 		if _, err := FindApiKeyByValue(key); err == nil {
 			continue
 		}
