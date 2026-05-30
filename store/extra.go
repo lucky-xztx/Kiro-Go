@@ -9,7 +9,7 @@ import (
 
 // ====================== Request logs ======================
 
-// RequestLog is one persisted call record.
+// RequestLog 表示一条请求日志记录。
 type RequestLog struct {
 	ID           string  `json:"id"`
 	CreatedAt    int64   `json:"createdAt"`
@@ -27,8 +27,7 @@ type RequestLog struct {
 	Error        string  `json:"error,omitempty"`
 }
 
-// LogRequest persists a single request log row. Errors are returned but the
-// caller usually logs and ignores — request handling must not depend on this.
+// LogRequest 持久化一条请求日志。错误会返回但调用方通常只记录并忽略——请求处理不能依赖此操作。
 func LogRequest(l RequestLog) error {
 	if db == nil {
 		return nil
@@ -58,17 +57,17 @@ func LogRequest(l RequestLog) error {
 	return err
 }
 
-// LogQuery filters returned by ListRequestLogs.
+// LogQuery 请求日志查询筛选条件。
 type LogQuery struct {
 	ApiKeyID  string
 	UserID    string
 	AccountID string
-	Since     int64 // unix seconds, 0 means no lower bound
-	Limit     int   // default 100, max 1000
-	Offset    int   // for pagination
+	Since     int64 // unix 时间戳，0 表示无下界
+	Limit     int   // 默认 100，最大 1000
+	Offset    int   // 分页偏移
 }
 
-// CountRequestLogs returns the total number of rows matching the query (ignores Limit/Offset).
+// CountRequestLogs 返回匹配查询条件的总行数（忽略 Limit/Offset）。
 func CountRequestLogs(q LogQuery) (int64, error) {
 	if db == nil {
 		return 0, nil
@@ -103,14 +102,13 @@ func CountRequestLogs(q LogQuery) (int64, error) {
 	return n, nil
 }
 
-// RateStats aggregates request count and token sum within a window.
+// RateStats 聚合指定时间窗口内的请求数和 Token 总量。
 type RateStats struct {
 	Requests int64 `json:"requests"`
 	Tokens   int64 `json:"tokens"`
 }
 
-// RequestRate returns request count and token sum for the given query within
-// the time window [since, now]. Used for RPM/TPM-style metrics.
+// RequestRate 返回指定时间窗口 [since, now] 内的请求数和 Token 总量。用于 RPM/TPM 指标。
 func RequestRate(q LogQuery, since int64) (RateStats, error) {
 	var s RateStats
 	if db == nil {
@@ -192,7 +190,7 @@ func ListRequestLogs(q LogQuery) ([]RequestLog, error) {
 	return out, rows.Err()
 }
 
-// PruneRequestLogs deletes rows older than the cutoff. Caller picks the cutoff.
+// PruneRequestLogs 删除指定时间之前的请求日志。由调用方选择截止时间。
 func PruneRequestLogs(cutoff int64) (int64, error) {
 	if db == nil {
 		return 0, nil
@@ -204,16 +202,15 @@ func PruneRequestLogs(cutoff int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// UsagePoint is one bucket in a usage timeseries query.
+// UsagePoint 表示使用量时间序列查询中的一个数据点。
 type UsagePoint struct {
-	Bucket   int64   `json:"bucket"` // unix seconds for the start of the bucket
+	Bucket   int64   `json:"bucket"` // 时间桶起始的 unix 时间戳
 	Requests int64   `json:"requests"`
 	Tokens   int64   `json:"tokens"`
 	Credits  float64 `json:"credits"`
 }
 
-// UsageSeries returns per-day usage for the given key (empty = all keys),
-// over `days` days ending now.
+// UsageSeries 返回指定 API Key（空字符串表示所有 Key）在最近 days 天内的每日使用量。
 func UsageSeries(apiKeyID string, days int) ([]UsagePoint, error) {
 	if db == nil {
 		return nil, nil
@@ -317,8 +314,7 @@ func DeleteModelAlias(alias string) error {
 	return err
 }
 
-// ResolveModel returns the configured target if `model` is registered as an
-// alias; otherwise returns model unchanged.
+// ResolveModel 如果 model 是已注册的别名则返回其目标模型，否则原样返回。
 func ResolveModel(model string) string {
 	if db == nil || model == "" {
 		return model

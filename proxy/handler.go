@@ -338,8 +338,8 @@ func (h *Handler) validateApiKey(r *http.Request) bool {
 	return err == nil
 }
 
-// authenticateForClaude runs authenticate and writes a Claude-style error on failure.
-// Returns the request with the matched API key injected into context, or nil if auth failed.
+// authenticateForClaude 执行认证，失败时写入 Claude 风格错误响应。
+// 返回注入了 API Key 上下文的请求，认证失败返回 nil。
 func (h *Handler) authenticateForClaude(w http.ResponseWriter, r *http.Request) *http.Request {
 	entry, ar, err := h.authenticate(r)
 	if err != nil {
@@ -1369,9 +1369,8 @@ func (h *Handler) saveStats() {
 	)
 }
 
-// Shutdown stops background loops and flushes any pending statistics to disk.
-// Safe to call once during graceful shutdown; persists both the global counters
-// and the pool's per-account runtime stats that the coalescing flusher batches.
+// Shutdown 停止后台循环并将待处理的统计信息刷写到磁盘。
+// 可在优雅关闭时安全调用一次；同时持久化全局计数器和连接池中按账号聚合的运行时统计。
 func (h *Handler) Shutdown() {
 	// Stop background loops if still running (idempotent via non-blocking close).
 	select {
@@ -1411,17 +1410,16 @@ func (h *Handler) recordSuccess(inputTokens, outputTokens int, credits float64) 
 	h.addCredits(credits)
 }
 
-// recordSuccessForApiKey is recordSuccess + per-API-key usage attribution.
-// When apiKeyID is empty (legacy single-key path or unauthenticated path), only the
-// global counters are updated. Persistence errors are logged but do not propagate.
+// recordSuccessForApiKey 是 recordSuccess 的扩展，增加按 API Key 的用量归属。
+// 当 apiKeyID 为空（旧版单 Key 路径或未认证路径）时，仅更新全局计数器。
+// 持久化错误只记录日志，不向上传播。
 //
-// apiKeyID may be either:
-//   - a legacy config.ApiKeyEntry ID (config.RecordApiKeyUsage)
-//   - a per-user store.UserApiKey ID (store.RecordApiKeyUsage)
+// apiKeyID 可能是：
+//   - 旧版 config.ApiKeyEntry ID（config.RecordApiKeyUsage）
+//   - 用户级 store.UserApiKey ID（store.RecordApiKeyUsage）
 //
-// If a userApiKeyID context value is also present on the request, this helper
-// is given that ID directly by callers; otherwise we fall through to the
-// legacy config path.
+// 如果请求上下文中存在 userApiKeyID，调用方会直接传入该 ID；
+// 否则回退到旧版 config 路径。
 func (h *Handler) recordSuccessForApiKey(apiKeyID string, inputTokens, outputTokens int, credits float64) {
 	h.recordSuccess(inputTokens, outputTokens, credits)
 	if apiKeyID == "" {
@@ -2192,157 +2190,235 @@ func (h *Handler) ensureValidToken(account *config.Account) error {
 
 // ==================== 管理 API ====================
 
+// resolveAdminUser 从请求中解析管理员用户信息，用于鉴权和审计。
+// 返回 nil 表示未通过鉴权。
+func (h *Handler) resolveAdminUser(r *http.Request) *store.User {
+	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
+		if _, u, err := store.LookupSession(c.Value); err == nil && u != nil && u.Role == "admin" && u.Enabled {
+			return u
+		}
+	}
+	pw := r.Header.Get("X-Admin-Password")
+	if pw == "" {
+		if c, err := r.Cookie("admin_password"); err == nil {
+			pw = c.Value
+		}
+	}
+	if pw != "" && store.ConstantTimeEqual(pw, config.GetPassword()) {
+		if u, err := store.GetUserByUsername("admin"); err == nil {
+			return u
+		}
+	}
+	return nil
+}
+
+// audit 记录一条操作审计日志（异步，不阻塞请求）。
+// 仅当操作成功（HTTP 2xx）时才写入，避免记录失败操作产生噪音。
+func (h *Handler) audit(operator *store.User, action, targetType, targetID, detail string, w http.ResponseWriter, r *http.Request) {
+	if operator == nil {
+		return
+	}
+	sw, ok := w.(*statusWriter)
+	if ok && (sw.status < 200 || sw.status >= 300) {
+		return
+	}
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = r.Header.Get("X-Forwarded-For")
+	}
+	if ip == "" {
+		ip = strings.SplitN(r.RemoteAddr, ":", 2)[0]
+	}
+	go store.LogAudit(store.AuditLog{
+		UserID:     operator.ID,
+		Username:   operator.Username,
+		Action:     action,
+		TargetType: targetType,
+		TargetID:   targetID,
+		Detail:     detail,
+		IPAddress:  ip,
+	})
+}
+
+// statusWriter 包装 http.ResponseWriter，捕获写入的 HTTP 状态码。
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (sw *statusWriter) WriteHeader(code int) {
+	sw.status = code
+	sw.ResponseWriter.WriteHeader(code)
+}
+
 func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
-	// 验证身份：优先认 session cookie + admin 角色，回退到老的 X-Admin-Password
-	if !h.adminAuthorized(r) {
+	operator := h.resolveAdminUser(r)
+	if operator == nil {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Unauthorized"})
 		return
 	}
+	sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 
 	path := strings.TrimPrefix(r.URL.Path, "/admin/api")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
 	switch {
 	case path == "/accounts" && r.Method == "GET":
-		h.apiGetAccounts(w, r)
+		h.apiGetAccounts(sw, r)
 	case path == "/accounts" && r.Method == "POST":
-		h.apiAddAccount(w, r)
+		h.apiAddAccount(sw, r)
+		h.audit(operator, "account.add", "account", "", "", sw, r)
 	case path == "/accounts/batch" && r.Method == "POST":
-		h.apiBatchAccounts(w, r)
+		h.apiBatchAccounts(sw, r)
+		h.audit(operator, "account.batch_add", "account", "", "", sw, r)
 	// models/refresh 必须在通用 /refresh 前匹配，否则会被误拦截
 	case path == "/accounts/models/refresh" && r.Method == "POST":
-		h.apiRefreshAllAccountsModels(w, r)
+		h.apiRefreshAllAccountsModels(sw, r)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/models/refresh") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/models/refresh")
-		h.apiRefreshAccountModels(w, r, id)
+		h.apiRefreshAccountModels(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/refresh") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/refresh")
-		h.apiRefreshAccount(w, r, id)
+		h.apiRefreshAccount(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/test") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/test")
-		h.apiTestAccount(w, r, id)
+		h.apiTestAccount(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/models/cached") && r.Method == "GET":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/models/cached")
-		h.apiGetAccountModelsCached(w, r, id)
+		h.apiGetAccountModelsCached(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/models") && r.Method == "GET":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/models")
-		h.apiGetAccountModels(w, r, id)
+		h.apiGetAccountModels(sw, r, id)
 
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/overage") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/overage")
-		h.apiSetAccountOverage(w, r, id)
+		h.apiSetAccountOverage(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/overage") && r.Method == "GET":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/overage")
-		h.apiGetAccountOverage(w, r, id)
+		h.apiGetAccountOverage(sw, r, id)
 
 	case strings.HasPrefix(path, "/accounts/") && strings.HasSuffix(path, "/full") && r.Method == "GET":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/accounts/"), "/full")
-		h.apiGetAccountFull(w, r, id)
+		h.apiGetAccountFull(sw, r, id)
 	case strings.HasPrefix(path, "/accounts/") && r.Method == "DELETE":
-		h.apiDeleteAccount(w, r, strings.TrimPrefix(path, "/accounts/"))
+		h.apiDeleteAccount(sw, r, strings.TrimPrefix(path, "/accounts/"))
+		h.audit(operator, "account.delete", "account", strings.TrimPrefix(path, "/accounts/"), "", sw, r)
 	case strings.HasPrefix(path, "/accounts/") && r.Method == "PUT":
-		h.apiUpdateAccount(w, r, strings.TrimPrefix(path, "/accounts/"))
+		h.apiUpdateAccount(sw, r, strings.TrimPrefix(path, "/accounts/"))
+		h.audit(operator, "account.update", "account", strings.TrimPrefix(path, "/accounts/"), "", sw, r)
 	case path == "/auth/iam-sso/start" && r.Method == "POST":
-		h.apiStartIamSso(w, r)
+		h.apiStartIamSso(sw, r)
 	case path == "/auth/iam-sso/complete" && r.Method == "POST":
-		h.apiCompleteIamSso(w, r)
+		h.apiCompleteIamSso(sw, r)
 	case path == "/auth/builderid/start" && r.Method == "POST":
-		h.apiStartBuilderIdLogin(w, r)
+		h.apiStartBuilderIdLogin(sw, r)
 	case path == "/auth/builderid/poll" && r.Method == "POST":
-		h.apiPollBuilderIdAuth(w, r)
+		h.apiPollBuilderIdAuth(sw, r)
 	case path == "/auth/sso-token" && r.Method == "POST":
-		h.apiImportSsoToken(w, r)
+		h.apiImportSsoToken(sw, r)
 	case path == "/auth/credentials" && r.Method == "POST":
-		h.apiImportCredentials(w, r)
+		h.apiImportCredentials(sw, r)
 	case path == "/auth/codex-import" && r.Method == "POST":
-		h.apiImportCodexAccount(w, r)
+		h.apiImportCodexAccount(sw, r)
 	case path == "/auth/codex/oauth/start" && r.Method == "POST":
-		h.apiCodexOAuthStart(w, r)
+		h.apiCodexOAuthStart(sw, r)
 	case path == "/auth/codex/oauth/callback" && r.Method == "POST":
-		h.apiCodexOAuthCallback(w, r)
+		h.apiCodexOAuthCallback(sw, r)
 	case path == "/auth/codex/device/start" && r.Method == "POST":
-		h.apiCodexDeviceStart(w, r)
+		h.apiCodexDeviceStart(sw, r)
 	case path == "/auth/codex/device/poll" && r.Method == "POST":
-		h.apiCodexDevicePoll(w, r)
+		h.apiCodexDevicePoll(sw, r)
 	case path == "/status" && r.Method == "GET":
-		h.apiGetStatus(w, r)
+		h.apiGetStatus(sw, r)
 	case path == "/settings" && r.Method == "GET":
-		h.apiGetSettings(w, r)
+		h.apiGetSettings(sw, r)
 	case path == "/settings" && r.Method == "POST":
-		h.apiUpdateSettings(w, r)
+		h.apiUpdateSettings(sw, r)
+		h.audit(operator, "settings.update", "settings", "", "", sw, r)
 	case path == "/stats" && r.Method == "GET":
-		h.apiGetStats(w, r)
+		h.apiGetStats(sw, r)
 	case path == "/stats/reset" && r.Method == "POST":
-		h.apiResetStats(w, r)
+		h.apiResetStats(sw, r)
 	case path == "/generate-machine-id" && r.Method == "GET":
-		h.apiGenerateMachineId(w, r)
+		h.apiGenerateMachineId(sw, r)
 	case path == "/thinking" && r.Method == "GET":
-		h.apiGetThinkingConfig(w, r)
+		h.apiGetThinkingConfig(sw, r)
 	case path == "/thinking" && r.Method == "POST":
-		h.apiUpdateThinkingConfig(w, r)
+		h.apiUpdateThinkingConfig(sw, r)
 	case path == "/endpoint" && r.Method == "GET":
-		h.apiGetEndpointConfig(w, r)
+		h.apiGetEndpointConfig(sw, r)
 	case path == "/endpoint" && r.Method == "POST":
-		h.apiUpdateEndpointConfig(w, r)
+		h.apiUpdateEndpointConfig(sw, r)
 	case path == "/proxy" && r.Method == "GET":
-		h.apiGetProxy(w, r)
+		h.apiGetProxy(sw, r)
 	case path == "/proxy" && r.Method == "POST":
-		h.apiUpdateProxy(w, r)
+		h.apiUpdateProxy(sw, r)
 	case path == "/prompt-filter" && r.Method == "GET":
-		h.apiGetPromptFilter(w, r)
+		h.apiGetPromptFilter(sw, r)
 	case path == "/prompt-filter" && r.Method == "POST":
-		h.apiUpdatePromptFilter(w, r)
+		h.apiUpdatePromptFilter(sw, r)
 	case path == "/version" && r.Method == "GET":
-		h.apiGetVersion(w, r)
+		h.apiGetVersion(sw, r)
 	case path == "/export" && r.Method == "POST":
-		h.apiExportAccounts(w, r)
+		h.apiExportAccounts(sw, r)
 	case path == "/api-keys" && r.Method == "GET":
-		h.apiListApiKeys(w, r)
+		h.apiListApiKeys(sw, r)
 	case path == "/api-keys" && r.Method == "POST":
-		h.apiCreateApiKey(w, r)
+		h.apiCreateApiKey(sw, r)
+		h.audit(operator, "apikey.create", "apikey", "", "", sw, r)
 	case strings.HasPrefix(path, "/api-keys/") && strings.HasSuffix(path, "/reset-usage") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/api-keys/"), "/reset-usage")
-		h.apiResetApiKeyUsage(w, r, id)
+		h.apiResetApiKeyUsage(sw, r, id)
+		h.audit(operator, "apikey.reset_usage", "apikey", id, "", sw, r)
 	case strings.HasPrefix(path, "/api-keys/") && r.Method == "GET":
-		h.apiGetApiKey(w, r, strings.TrimPrefix(path, "/api-keys/"))
+		h.apiGetApiKey(sw, r, strings.TrimPrefix(path, "/api-keys/"))
 	case strings.HasPrefix(path, "/api-keys/") && r.Method == "PUT":
-		h.apiUpdateApiKey(w, r, strings.TrimPrefix(path, "/api-keys/"))
+		h.apiUpdateApiKey(sw, r, strings.TrimPrefix(path, "/api-keys/"))
+		h.audit(operator, "apikey.update", "apikey", strings.TrimPrefix(path, "/api-keys/"), "", sw, r)
 	case strings.HasPrefix(path, "/api-keys/") && r.Method == "DELETE":
-		h.apiDeleteApiKey(w, r, strings.TrimPrefix(path, "/api-keys/"))
+		h.apiDeleteApiKey(sw, r, strings.TrimPrefix(path, "/api-keys/"))
+		h.audit(operator, "apikey.delete", "apikey", strings.TrimPrefix(path, "/api-keys/"), "", sw, r)
 	case path == "/users" && r.Method == "GET":
-		h.apiAdminListUsers(w, r)
+		h.apiAdminListUsers(sw, r)
 	case path == "/users" && r.Method == "POST":
-		h.apiAdminCreateUser(w, r)
+		h.apiAdminCreateUser(sw, r)
+		h.audit(operator, "user.create", "user", "", "", sw, r)
 	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/password") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/password")
-		h.apiAdminResetUserPassword(w, r, id)
+		h.apiAdminResetUserPassword(sw, r, id)
+		h.audit(operator, "user.reset_password", "user", id, "", sw, r)
 	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/role") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/role")
-		h.apiAdminSetUserRole(w, r, id)
+		h.apiAdminSetUserRole(sw, r, id)
+		h.audit(operator, "user.set_role", "user", id, "", sw, r)
 	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/enabled") && r.Method == "POST":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/enabled")
-		h.apiAdminSetUserEnabled(w, r, id)
+		h.apiAdminSetUserEnabled(sw, r, id)
+		h.audit(operator, "user.set_enabled", "user", id, "", sw, r)
 	case strings.HasPrefix(path, "/users/") && strings.HasSuffix(path, "/keys") && r.Method == "GET":
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/users/"), "/keys")
-		h.apiAdminListUserKeys(w, r, id)
+		h.apiAdminListUserKeys(sw, r, id)
 	case strings.HasPrefix(path, "/users/") && r.Method == "DELETE":
-		h.apiAdminDeleteUser(w, r, strings.TrimPrefix(path, "/users/"))
+		h.apiAdminDeleteUser(sw, r, strings.TrimPrefix(path, "/users/"))
+		h.audit(operator, "user.delete", "user", strings.TrimPrefix(path, "/users/"), "", sw, r)
 	case path == "/logs" && r.Method == "GET":
-		h.apiAdminListLogs(w, r)
+		h.apiAdminListLogs(sw, r)
+	case path == "/audit-logs" && r.Method == "GET":
+		h.apiAdminListAuditLogs(sw, r)
 	case path == "/usage-series" && r.Method == "GET":
-		h.apiAdminUsageSeries(w, r)
+		h.apiAdminUsageSeries(sw, r)
 	case path == "/aliases" && r.Method == "GET":
-		h.apiAdminListAliases(w, r)
+		h.apiAdminListAliases(sw, r)
 	case path == "/aliases" && r.Method == "POST":
-		h.apiAdminUpsertAlias(w, r)
+		h.apiAdminUpsertAlias(sw, r)
 	case strings.HasPrefix(path, "/aliases/") && r.Method == "DELETE":
-		h.apiAdminDeleteAlias(w, r, strings.TrimPrefix(path, "/aliases/"))
+		h.apiAdminDeleteAlias(sw, r, strings.TrimPrefix(path, "/aliases/"))
 	case path == "/providers" && r.Method == "GET":
-		h.apiAdminListProviders(w, r)
+		h.apiAdminListProviders(sw, r)
 	default:
-		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Not Found"})
+		sw.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(sw).Encode(map[string]string{"error": "Not Found"})
 	}
 }
 
@@ -2559,7 +2635,7 @@ func (h *Handler) apiGetAccountOverage(w http.ResponseWriter, r *http.Request, i
 }
 
 // apiSetAccountOverage 翻转单个账号的上游 Overages 开关，并刷新缓存。
-// Body: {"enabled": true|false}
+// 请求体：{"enabled": true|false}
 func (h *Handler) apiSetAccountOverage(w http.ResponseWriter, r *http.Request, id string) {
 	var body struct {
 		Enabled bool `json:"enabled"`
@@ -3640,6 +3716,42 @@ func (h *Handler) apiGetAccountModelsCached(w http.ResponseWriter, r *http.Reque
 		"success": true,
 		"models":  models,
 	})
+}
+
+// apiAdminListAuditLogs 查询审计日志，支持按操作类型、用户、时间筛选。
+func (h *Handler) apiAdminListAuditLogs(w http.ResponseWriter, r *http.Request) {
+	q := store.AuditQuery{
+		UserID:     r.URL.Query().Get("userId"),
+		Action:     r.URL.Query().Get("action"),
+		TargetType: r.URL.Query().Get("targetType"),
+		Limit:      100,
+		Offset:     0,
+	}
+	if s := r.URL.Query().Get("limit"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			q.Limit = n
+		}
+	}
+	if s := r.URL.Query().Get("offset"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n >= 0 {
+			q.Offset = n
+		}
+	}
+	if s := r.URL.Query().Get("since"); s != "" {
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			q.Since = n
+		}
+	}
+	logs, err := store.ListAuditLogs(q)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if logs == nil {
+		logs = []store.AuditLog{}
+	}
+	json.NewEncoder(w).Encode(logs)
 }
 
 // ==================== 静态文件服务 ====================

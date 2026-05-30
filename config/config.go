@@ -1,13 +1,12 @@
-// Package config provides configuration management for Kiro API Proxy.
+// Package config 提供 Kiro API 代理的配置管理。
 //
-// This package handles persistent storage and retrieval of:
-//   - Account credentials and authentication tokens
-//   - Server settings (port, host, API keys)
-//   - Usage statistics and metrics
-//   - Thinking mode configuration for AI responses
+// 本包负责以下持久化存储和检索：
+//   - 账号凭证和认证令牌
+//   - 服务器设置（端口、主机、API Key）
+//   - 使用统计和指标
+//   - AI 响应的 Thinking 模式配置
 //
-// All configuration is stored in a JSON file with thread-safe access
-// via read-write mutex protection.
+// 所有配置存储在 JSON 文件中，通过读写互斥锁保证线程安全。
 package config
 
 import (
@@ -20,9 +19,9 @@ import (
 	"time"
 )
 
-// GenerateMachineId generates a UUID v4 format machine identifier.
-// This ID is used to uniquely identify the proxy instance in Kiro API requests,
-// helping with request tracking and rate limiting on the server side.
+// GenerateMachineId 生成 UUID v4 格式的机器标识符。
+// 此 ID 用于在 Kiro API 请求中唯一标识代理实例，
+// 辅助服务端的请求追踪和速率限制。
 func GenerateMachineId() string {
 	bytes := make([]byte, 16)
 	rand.Read(bytes)

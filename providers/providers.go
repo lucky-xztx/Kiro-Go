@@ -1,24 +1,22 @@
-// Package providers describes the upstream services this proxy can route to.
-// Each provider has a stable identifier ("kiro", "codex", ...) used as the
-// value of Account.Upstream and as routing hints elsewhere.
+// Package providers 描述本代理可路由到的上游服务。
+// 每个提供者拥有稳定标识符（"kiro"、"codex" 等），用作 Account.Upstream 的值和路由提示。
 //
-// At the moment only "kiro" is fully wired. The others are listed so the UI
-// can display them as upcoming options and operators can pre-create accounts
-// without breaking lookups.
+// 目前仅 "kiro" 已完全接入。其他提供者仅列出以便 UI 显示为即将支持选项，
+// 运维人员可以预先创建账号而不会破坏查找逻辑。
 package providers
 
 import "sort"
 
-// Status reports whether a provider's request flow is fully implemented.
+// Status 表示提供者请求流程的实现状态。
 type Status string
 
 const (
-	StatusReady   Status = "ready"   // Real upstream support, can serve traffic.
-	StatusStub    Status = "stub"    // Placeholder — accounts can be created but requests won't route yet.
-	StatusPlanned Status = "planned" // Listed in UI for visibility, no account creation yet.
+	StatusReady   Status = "ready"   // 真实上游支持，可提供服务。
+	StatusStub    Status = "stub"    // 占位——可创建账号但请求尚未路由。
+	StatusPlanned Status = "planned" // UI 中可见，尚不支持创建账号。
 )
 
-// Provider describes one upstream the proxy knows about.
+// Provider 描述代理所知的一个上游服务。
 type Provider struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
@@ -31,41 +29,41 @@ var registry = []Provider{
 	{
 		ID:          "kiro",
 		Label:       "Kiro / AWS Q",
-		Description: "AWS Q Developer / Kiro IdC OAuth pool. Backs /v1/messages, /v1/chat/completions and /v1/responses today.",
+		Description: "AWS Q Developer / Kiro IdC OAuth 连接池。当前支持 /v1/messages、/v1/chat/completions 和 /v1/responses。",
 		Status:      StatusReady,
-		AuthHint:    "AWS IdC OAuth (Builder ID / Social).",
+		AuthHint:    "AWS IdC OAuth（Builder ID / 社交登录）。",
 	},
 	{
 		ID:          "codex",
 		Label:       "OpenAI Codex",
-		Description: "OpenAI Codex (GPT) via ChatGPT OAuth. Supports GPT-5.5, GPT-5.4, and other Codex models.",
+		Description: "OpenAI Codex (GPT) 通过 ChatGPT OAuth。支持 GPT-5.5、GPT-5.4 及其他 Codex 模型。",
 		Status:      StatusReady,
-		AuthHint:    "ChatGPT OAuth tokens (refresh_token + access_token).",
+		AuthHint:    "ChatGPT OAuth 令牌（refresh_token + access_token）。",
 	},
 	{
 		ID:          "claude-code",
 		Label:       "Anthropic Claude Code",
-		Description: "Claude Code OAuth pool. Account import works; request routing is reserved for a later release.",
+		Description: "Claude Code OAuth 连接池。账号导入可用；请求路由保留至后续版本。",
 		Status:      StatusStub,
-		AuthHint:    "Anthropic OAuth tokens.",
+		AuthHint:    "Anthropic OAuth 令牌。",
 	},
 	{
 		ID:          "gemini",
 		Label:       "Google Gemini CLI",
-		Description: "Google Gemini CLI / AI Studio OAuth pool.",
+		Description: "Google Gemini CLI / AI Studio OAuth 连接池。",
 		Status:      StatusPlanned,
-		AuthHint:    "Google OAuth.",
+		AuthHint:    "Google OAuth。",
 	},
 	{
 		ID:          "grok",
 		Label:       "xAI Grok Build",
-		Description: "xAI Grok build OAuth pool.",
+		Description: "xAI Grok build OAuth 连接池。",
 		Status:      StatusPlanned,
-		AuthHint:    "xAI OAuth.",
+		AuthHint:    "xAI OAuth。",
 	},
 }
 
-// All returns the registered providers in stable display order (Ready, Stub, Planned).
+// All 返回已注册的提供者，按稳定显示顺序排列（Ready、Stub、Planned）。
 func All() []Provider {
 	out := make([]Provider, len(registry))
 	copy(out, registry)
@@ -89,8 +87,7 @@ func All() []Provider {
 	return out
 }
 
-// Lookup returns the provider with the given id, or the default ("kiro") if
-// the id is empty / unknown — so code can always render something sane.
+// Lookup 返回指定 id 的提供者。若 id 为空或未知，返回默认提供者（"kiro"）。
 func Lookup(id string) Provider {
 	for _, p := range registry {
 		if p.ID == id {
@@ -105,8 +102,7 @@ func Lookup(id string) Provider {
 	return registry[0]
 }
 
-// Normalize maps an empty/unknown upstream id to "kiro" so legacy accounts
-// silently land on the only fully-wired provider.
+// Normalize 将空或未知的上游 id 映射为 "kiro"，使旧版账号静默回退到唯一完全接入的提供者。
 func Normalize(id string) string {
 	if id == "" {
 		return "kiro"
@@ -119,7 +115,7 @@ func Normalize(id string) string {
 	return "kiro"
 }
 
-// IsReady reports whether the provider is currently able to serve requests.
+// IsReady 判断提供者当前是否能够处理请求。
 func IsReady(id string) bool {
 	return Lookup(id).Status == StatusReady
 }

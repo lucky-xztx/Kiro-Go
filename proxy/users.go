@@ -12,20 +12,18 @@ import (
 	"time"
 )
 
-// SessionCookieName is the cookie that carries the opaque session token.
+// SessionCookieName 是携带不透明会话令牌的 Cookie 名称。
 const SessionCookieName = "kiro_session"
 
-// userContextKey holds the *store.User on the request context.
+// userContextKey 用于在请求上下文中存储 *store.User。
 type userContextKey struct{}
 
-// requireAuth resolves the current user. Returns the user (or nil) and writes a
-// 401 response when authRequired is true and resolution fails.
+// resolveUser 解析当前用户。返回用户（或 nil），当 authRequired 为 true 且解析失败时写入 401 响应。
 //
-// Resolution order:
-//  1. Cookie `kiro_session` → SQLite session row
-//  2. Legacy admin password (header X-Admin-Password or cookie admin_password)
-//     against config.Password — bound to the SQLite admin user, kept so older
-//     clients keep working without an extra round-trip.
+// 解析顺序：
+//  1. Cookie `kiro_session` → SQLite 会话记录
+//  2. 旧版管理员密码（请求头 X-Admin-Password 或 Cookie admin_password）
+//     与 config.Password 比对——绑定到 SQLite admin 用户，保持旧客户端兼容。
 func (h *Handler) resolveUser(w http.ResponseWriter, r *http.Request, authRequired bool) *store.User {
 	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
 		if _, u, err := store.LookupSession(c.Value); err == nil {
@@ -49,7 +47,7 @@ func (h *Handler) resolveUser(w http.ResponseWriter, r *http.Request, authRequir
 	return nil
 }
 
-// requireAdmin returns the user only if they are an admin; otherwise writes 403.
+// requireAdmin 仅当用户是管理员时返回用户，否则写入 403 响应。
 func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) *store.User {
 	u := h.resolveUser(w, r, true)
 	if u == nil {
@@ -62,30 +60,14 @@ func (h *Handler) requireAdmin(w http.ResponseWriter, r *http.Request) *store.Us
 	return u
 }
 
-// adminAuthorized reports whether the request carries valid admin credentials.
-// Accepts: (1) session cookie tied to a user with role=admin, or (2) the legacy
-// X-Admin-Password header / admin_password cookie matching config.Password.
+// adminAuthorized 检查请求是否携带有效的管理员凭证。
+// 复用 resolveAdminUser 避免鉴权逻辑分叉。
 func (h *Handler) adminAuthorized(r *http.Request) bool {
-	if c, err := r.Cookie(SessionCookieName); err == nil && c.Value != "" {
-		if _, u, err := store.LookupSession(c.Value); err == nil && u != nil && u.Role == "admin" && u.Enabled {
-			return true
-		}
-	}
-	pw := r.Header.Get("X-Admin-Password")
-	if pw == "" {
-		if c, err := r.Cookie("admin_password"); err == nil {
-			pw = c.Value
-		}
-	}
-	if pw != "" && store.ConstantTimeEqual(pw, config.GetPassword()) {
-		return true
-	}
-	return false
+	return h.resolveAdminUser(r) != nil
 }
 
-// handleUserAPI dispatches /api/* (NOT /admin/api/*) routes related to users
-// and per-user API keys. Returns true when it has handled the request so the
-// main router can fall through.
+// handleUserAPI 分发 /api/*（非 /admin/api/*）路由，处理用户和用户级 API Key。
+// 返回 true 表示已处理请求，主路由可跳过。
 func (h *Handler) handleUserAPI(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/") {
@@ -117,8 +99,8 @@ func (h *Handler) handleUserAPI(w http.ResponseWriter, r *http.Request) bool {
 	case path == "/api/me/logs" && r.Method == "GET":
 		h.apiListMyLogs(w, r)
 	default:
-		// Public endpoints (already handled in the main router) shouldn't reach
-		// here; for everything else under /api/, signal "not handled".
+		// 公共端点已在主路由中处理，不会到达这里；
+		// /api/ 下的其他路径返回"未处理"。
 		return false
 	}
 	return true

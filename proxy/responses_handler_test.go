@@ -202,10 +202,9 @@ func TestResponsesPreviousResponseIDExpandsFullChain(t *testing.T) {
 	}
 }
 
-// New instructions sent on a continuation request must take effect, even when
-// previous_response_id is set. The bug: the old code only attached
-// req.Instructions when previous_response_id was empty, silently dropping
-// updated system prompts on follow-up turns.
+// 续传请求中发送的新指令必须生效，即使设置了 previous_response_id。
+// 之前的 Bug：旧代码仅在 previous_response_id 为空时才附加 req.Instructions，
+// 导致后续轮次中更新的系统提示被静默丢弃。
 func TestResponsesContinuationKeepsNewInstructions(t *testing.T) {
 	h, cleanup := setupResponsesTestHandler(t)
 	defer cleanup()

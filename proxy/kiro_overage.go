@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// kiroQAPIBase is the AWS Q Developer endpoint that owns the user-level Overages
-// switch. Distinct from kiroRestAPIBase (CodeWhisperer) which is used elsewhere.
+// kiroQAPIBase 是 AWS Q Developer 端点，拥有用户级别的超额开关。
+// 与项目中其他地方使用的 kiroRestAPIBase（CodeWhisperer）不同。
 const kiroQAPIBase = "https://q.us-east-1.amazonaws.com"
 
-// OverageSnapshot captures the upstream Overages state for an account.
+// OverageSnapshot 捕获账号的上游超额使用状态快照。
 type OverageSnapshot struct {
 	Status            string  `json:"status"`            // "ENABLED" | "DISABLED" | "UNKNOWN"
 	Capability        string  `json:"capability"`        // "OVERAGE_CAPABLE" | ...
@@ -28,8 +28,7 @@ type OverageSnapshot struct {
 	CheckedAt         int64   `json:"checkedAt"`         // Unix seconds
 }
 
-// upstreamOverageResponse mirrors the parts of /getUsageLimits we need for
-// the Overages switch UI. Other fields are already parsed elsewhere.
+// upstreamOverageResponse 映射 /getUsageLimits 响应中与超额开关相关的字段。
 type upstreamOverageResponse struct {
 	OverageConfiguration *struct {
 		OverageStatus string `json:"overageStatus"`
@@ -46,8 +45,7 @@ type upstreamOverageResponse struct {
 	} `json:"usageBreakdownList"`
 }
 
-// FetchOverageStatus calls AWS Q `GET /getUsageLimits` and extracts the
-// Overages switch state plus subscription metadata.
+// FetchOverageStatus 调用 AWS Q GET /getUsageLimits，提取超额开关状态和订阅元数据。
 func FetchOverageStatus(account *config.Account) (*OverageSnapshot, error) {
 	if account == nil {
 		return nil, fmt.Errorf("account is nil")
@@ -105,11 +103,11 @@ func FetchOverageStatus(account *config.Account) (*OverageSnapshot, error) {
 	return snap, nil
 }
 
-// SetOverageStatus calls AWS Q `POST /setUserPreference` to flip the user-level
-// Overages switch, then re-fetches the snapshot for cache write-through.
+// SetOverageStatus 调用 AWS Q POST /setUserPreference 切换用户级别的超额开关，
+// 然后重新拉取快照以保证缓存一致性。
 //
-// `enabled=true`  → overageStatus="ENABLED"
-// `enabled=false` → overageStatus="DISABLED"
+// enabled=true  → overageStatus="ENABLED"
+// enabled=false → overageStatus="DISABLED"
 func SetOverageStatus(account *config.Account, enabled bool) (*OverageSnapshot, error) {
 	if account == nil {
 		return nil, fmt.Errorf("account is nil")
@@ -152,23 +150,23 @@ func SetOverageStatus(account *config.Account, enabled bool) (*OverageSnapshot, 
 
 	logger.Infof("[Overage] account=%s flipped overageStatus=%s upstream", account.Email, status)
 
-	// Best-effort re-read so cached fields (cap/rate/current) stay accurate.
+	// 尽力重新拉取，确保缓存字段（cap/rate/current）保持准确。
 	snap, fetchErr := FetchOverageStatus(account)
 	if fetchErr != nil {
-		// Still return a synthesized snapshot — the POST succeeded.
+		// POST 已成功，返回合成的快照即可。
 		logger.Warnf("[Overage] re-fetch after switch failed for %s: %v", account.Email, fetchErr)
 		return &OverageSnapshot{
 			Status:    status,
 			CheckedAt: time.Now().Unix(),
 		}, nil
 	}
-	// In rare cases AWS lags, force the just-set value.
+	// AWS 偶有延迟，强制使用刚设置的值。
 	snap.Status = status
 	return snap, nil
 }
 
-// PersistOverageSnapshot writes a snapshot back to config.json for an account.
-// Returns the persist error if any (caller decides whether to surface it).
+// PersistOverageSnapshot 将快照写回 config.json 中的账号配置。
+// 返回持久化错误（如有），由调用方决定是否展示。
 func PersistOverageSnapshot(accountID string, snap *OverageSnapshot) error {
 	if snap == nil {
 		return nil

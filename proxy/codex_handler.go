@@ -24,8 +24,8 @@ func isCodexModel(model string) bool {
 	return strings.HasPrefix(lower, "gpt-") || strings.HasPrefix(lower, "o1") || strings.HasPrefix(lower, "o3") || strings.HasPrefix(lower, "o4")
 }
 
-// codexModelForRequest maps a client-side model name to the Codex model ID.
-// If the model already looks like a valid Codex model, return as-is.
+// codexModelForRequest 将客户端模型名映射到 Codex 模型 ID。
+// 如果模型已经是有效的 Codex 模型，原样返回。
 func codexModelForRequest(model string) string {
 	// Pass through known Codex models directly
 	lower := strings.ToLower(model)
@@ -49,9 +49,8 @@ var codexModels = []string{
 	"gpt-5.3-codex-spark",
 }
 
-// codexModelsToModelInfo converts the live Codex model list into the unified
-// ModelInfo shape used by the aggregated /v1/models cache, tagging each as a
-// codex-owned model.
+// codexModelsToModelInfo 将 Codex 模型列表转换为统一的 ModelInfo 格式，
+// 供聚合的 /v1/models 缓存使用，标记为 codex 所属模型。
 func codexModelsToModelInfo(models []codex.CodexModel) []ModelInfo {
 	out := make([]ModelInfo, 0, len(models))
 	for _, m := range models {
@@ -114,9 +113,8 @@ func (h *Handler) getNextCodexAccount(excluded map[string]bool) *config.Account 
 	return nil
 }
 
-// ensureCodexToken ensures the Codex account has a valid access token.
-// It refreshes via the ChatGPT OAuth flow if the locally tracked token is near
-// expiry.
+// ensureCodexToken 确保 Codex 账号拥有有效的访问令牌。
+// 如果本地跟踪的令牌即将过期，通过 ChatGPT OAuth 流程刷新。
 func (h *Handler) ensureCodexToken(account *config.Account) error {
 	return h.refreshCodexToken(account, false)
 }
@@ -871,13 +869,13 @@ func (h *Handler) handleCodexResponsesStream(
 	h.sendOpenAIError(w, 502, "server_error", errMsg)
 }
 
-// apiImportCodexAccount imports a ChatGPT Codex account.
+// apiImportCodexAccount 导入 ChatGPT Codex 账号。
 //
-// Accepts two payload shapes:
+// 接受两种请求体格式：
 //
-//  1. Refresh-token-only: {"refreshToken": "..."}
-//     Uses the refresh token to obtain a fresh access_token + id_token, then
-//     extracts email + chatgpt_account_id from the id_token claims.
+//  1. 仅刷新令牌：{"refreshToken": "..."}
+//     使用刷新令牌获取新的 access_token + id_token，然后从 id_token 中
+//     提取 email + chatgpt_account_id。
 //
 //  2. Codex CLI auth.json blob:
 //     {

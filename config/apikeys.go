@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// ListApiKeys returns a snapshot of all configured API key entries.
+// ListApiKeys 返回所有已配置 API Key 条目的快照。
 func ListApiKeys() []ApiKeyEntry {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
@@ -20,7 +20,7 @@ func ListApiKeys() []ApiKeyEntry {
 	return out
 }
 
-// GetApiKeyEntry returns a copy of the entry with the given ID, or nil if not found.
+// GetApiKeyEntry 返回指定 ID 的 API Key 条目副本，未找到返回 nil。
 func GetApiKeyEntry(id string) *ApiKeyEntry {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
@@ -36,8 +36,8 @@ func GetApiKeyEntry(id string) *ApiKeyEntry {
 	return nil
 }
 
-// AddApiKey appends a new API key entry. Generates ID and CreatedAt if missing,
-// rejects empty Key values, and refuses duplicates of an existing Key.
+// AddApiKey 追加新的 API Key 条目。自动生成 ID 和 CreatedAt（如缺失），
+// 拒绝空 Key 值和重复的已有 Key。
 func AddApiKey(entry ApiKeyEntry) (ApiKeyEntry, error) {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
@@ -61,19 +61,19 @@ func AddApiKey(entry ApiKeyEntry) (ApiKeyEntry, error) {
 	}
 	cfg.ApiKeys = append(cfg.ApiKeys, entry)
 	if err := saveLocked(); err != nil {
-		// Roll back the in-memory append so we don't leave inconsistent state.
+		// 回滚内存中的追加操作，避免留下不一致状态。
 		cfg.ApiKeys = cfg.ApiKeys[:len(cfg.ApiKeys)-1]
 		return ApiKeyEntry{}, err
 	}
 	return entry, nil
 }
 
-// UpdateApiKey applies a patch to an existing API key. Patch semantics:
-//   - Name, Key are overwritten when non-empty in patch.
-//   - Enabled, TokenLimit, CreditLimit are always overwritten (zero values are valid).
-//   - Counters (TokensUsed/CreditsUsed/RequestsCount) are not touched here; use
-//     RecordApiKeyUsage or ResetApiKeyUsage instead.
-//   - Migrated stays as-is once true; only flips when explicitly set in patch.
+// UpdateApiKey 对已有 API Key 应用补丁更新。补丁语义：
+//   - Name、Key 在补丁中非空时覆盖。
+//   - Enabled、TokenLimit、CreditLimit 始终覆盖（零值也是合法值）。
+//   - 计数器（TokensUsed/CreditsUsed/RequestsCount）此处不修改；
+//     请使用 RecordApiKeyUsage 或 ResetApiKeyUsage。
+//   - Migrated 一旦为 true 就保持不变，仅在补丁中显式设置时翻转。
 func UpdateApiKey(id string, patch ApiKeyEntry) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
@@ -95,7 +95,7 @@ func UpdateApiKey(id string, patch ApiKeyEntry) error {
 	}
 	if patch.Key != "" {
 		newKey := strings.TrimSpace(patch.Key)
-		// Reject duplicates against any other entry.
+		// 拒绝与其他条目重复的 Key 值。
 		for j := range cfg.ApiKeys {
 			if j != idx && cfg.ApiKeys[j].Key == newKey {
 				return errors.New("api key value collides with existing entry")
@@ -112,8 +112,8 @@ func UpdateApiKey(id string, patch ApiKeyEntry) error {
 	return saveLocked()
 }
 
-// DeleteApiKey removes the API key entry with the given ID. Returns nil even if
-// the ID is unknown (idempotent), matching the existing DeleteAccount style.
+// DeleteApiKey 删除指定 ID 的 API Key 条目。即使 ID 不存在也返回 nil（幂等），
+// 与已有的 DeleteAccount 风格一致。
 func DeleteApiKey(id string) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
@@ -129,8 +129,7 @@ func DeleteApiKey(id string) error {
 	return nil
 }
 
-// FindApiKeyByValue returns a copy of the entry whose Key matches the given value,
-// or nil if no match. O(n) linear scan.
+// FindApiKeyByValue 返回 Key 值匹配的条目副本，未找到返回 nil。O(n) 线性扫描。
 func FindApiKeyByValue(key string) *ApiKeyEntry {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
@@ -146,7 +145,7 @@ func FindApiKeyByValue(key string) *ApiKeyEntry {
 	return nil
 }
 
-// HasApiKeys returns true when at least one API key entry is configured.
+// HasApiKeys 当至少配置了一个 API Key 条目时返回 true。
 func HasApiKeys() bool {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
@@ -156,8 +155,7 @@ func HasApiKeys() bool {
 	return len(cfg.ApiKeys) > 0
 }
 
-// RecordApiKeyUsage atomically adds tokens and credits to the entry's counters,
-// updates LastUsedAt, increments RequestsCount, and persists.
+// RecordApiKeyUsage 原子地累加 Token 和额度计数器，更新 LastUsedAt 和 RequestsCount，并持久化。
 func RecordApiKeyUsage(id string, tokens int64, credits float64) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
@@ -180,8 +178,8 @@ func RecordApiKeyUsage(id string, tokens int64, credits float64) error {
 	return errors.New("api key not found")
 }
 
-// ResetApiKeyUsage clears TokensUsed/CreditsUsed/RequestsCount for the entry.
-// LastUsedAt is preserved so operators can still see when the key was last used.
+// ResetApiKeyUsage 清零 TokensUsed/CreditsUsed/RequestsCount。
+// 保留 LastUsedAt 以便运维人员查看 Key 最后使用时间。
 func ResetApiKeyUsage(id string) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
@@ -199,16 +197,15 @@ func ResetApiKeyUsage(id string) error {
 	return errors.New("api key not found")
 }
 
-// GenerateApiKeyValue returns a new random 32-byte hex API key prefixed with "sk-".
+// GenerateApiKeyValue 生成新的 32 字节随机十六进制 API Key，前缀为 "sk-"。
 func GenerateApiKeyValue() string {
 	buf := make([]byte, 32)
 	_, _ = rand.Read(buf)
 	return "sk-" + hex.EncodeToString(buf)
 }
 
-// MaskApiKey produces a display-friendly masked version: keeps first 6 and last 4
-// characters, replaces the middle with "****". Returns "" for empty input and
-// the original string if it's too short to mask meaningfully.
+// MaskApiKey 生成用于展示的脱敏版本：保留前 6 位和后 4 位字符，
+// 中间用 "****" 替换。空字符串返回 ""，过短的字符串原样返回。
 func MaskApiKey(key string) string {
 	if key == "" {
 		return ""
@@ -219,8 +216,8 @@ func MaskApiKey(key string) string {
 	return key[:6] + "****" + key[len(key)-4:]
 }
 
-// ApiKeyOverLimit returns (overToken, overCredit) for the entry. Limits with value 0
-// are ignored. The function does not lock; callers should pass a copied entry.
+// ApiKeyOverLimit 返回 (overToken, overCredit) 是否超限。值为 0 的限制被忽略。
+// 此函数不加锁，调用方应传入已复制的条目。
 func ApiKeyOverLimit(e ApiKeyEntry) (overToken bool, overCredit bool) {
 	if e.TokenLimit > 0 && e.TokensUsed >= e.TokenLimit {
 		overToken = true
@@ -231,8 +228,8 @@ func ApiKeyOverLimit(e ApiKeyEntry) (overToken bool, overCredit bool) {
 	return
 }
 
-// GetLegacyApiKeysForMigration returns a snapshot of ApiKeys so the SQLite
-// store can migrate them out on first launch. Returns nil after migration runs.
+// GetLegacyApiKeysForMigration 返回 ApiKeys 的快照，供 SQLite store 在首次启动时迁移。
+// 迁移完成后返回 nil。
 func GetLegacyApiKeysForMigration() []ApiKeyEntry {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
@@ -244,9 +241,8 @@ func GetLegacyApiKeysForMigration() []ApiKeyEntry {
 	return out
 }
 
-// ClearLegacyApiKeys empties the in-config ApiKeys slice and persists. Called
-// once migration into the SQLite store has succeeded so the JSON file no
-// longer holds stale duplicates.
+// ClearLegacyApiKeys 清空配置中的 ApiKeys 切片并持久化。
+// 在迁移到 SQLite store 成功后调用一次，避免 JSON 文件中残留重复数据。
 func ClearLegacyApiKeys() error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()

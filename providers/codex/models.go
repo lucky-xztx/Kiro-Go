@@ -6,16 +6,15 @@ import (
 	"net/http"
 )
 
-// modelsURL is the ChatGPT backend endpoint that lists the models a given
-// account/plan can actually use. Mirrors the Codex CLI's own model discovery.
+// modelsURL 是 ChatGPT 后端端点，列出给定账号/套餐可用的模型。
+// 与 Codex CLI 自身的模型发现逻辑一致。
 const modelsURL = "https://chatgpt.com/backend-api/codex/models"
 
-// clientVersion is sent as the ?client_version= query param. It must match the
-// CLI version advertised in the User-Agent so the upstream returns the plan's
-// real model set rather than rejecting an unknown client.
+// clientVersion 作为 ?client_version= 查询参数发送。
+// 必须与 User-Agent 中声明的 CLI 版本一致，否则上游会返回未知客户端错误而非真实模型集。
 const clientVersion = "0.133.0"
 
-// CodexModel is a single entry returned by GET /backend-api/codex/models.
+// CodexModel 是 GET /backend-api/codex/models 返回的单个模型条目。
 type CodexModel struct {
 	Slug            string   `json:"slug"`
 	DisplayName     string   `json:"display_name"`
@@ -25,9 +24,8 @@ type CodexModel struct {
 	SupportedInAPI  bool     `json:"supported_in_api"`
 }
 
-// FetchCodexModels calls the ChatGPT models endpoint and returns the live list
-// of models available to the given account. No hardcoded fallback — if the
-// upstream call fails the caller gets the error and decides what to do.
+// FetchCodexModels 调用 ChatGPT 模型端点，返回给定账号可用的实时模型列表。
+// 无硬编码回退——若上游调用失败，调用方收到错误并自行决定处理方式。
 func FetchCodexModels(accessToken, accountID string) ([]CodexModel, error) {
 	req, err := http.NewRequest("GET", modelsURL+"?client_version="+clientVersion, nil)
 	if err != nil {

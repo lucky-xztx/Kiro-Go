@@ -320,9 +320,9 @@ func buildClaudeSystemPrompt(system interface{}, thinking bool) string {
 	return ThinkingModePrompt + "\n\n" + systemPrompt
 }
 
-// applyPromptFilters applies all enabled prompt filter rules to the system prompt.
-// Order: (1) Claude Code detection → full replacement, (2) strip boundary markers,
-// (3) strip env noise, (4) user-defined regex/line-filter rules.
+// applyPromptFilters 对系统提示词应用所有已启用的过滤规则。
+// 顺序：(1) Claude Code 检测 → 完整替换，(2) 去除边界标记，
+// (3) 去除环境噪音，(4) 用户自定义的正则/行过滤规则。
 func applyPromptFilters(prompt string) string {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
@@ -397,9 +397,9 @@ func stripBoundaryMarkers(prompt string) string {
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
-// stripEnvNoiseLines removes environment metadata lines and sections from a system prompt.
-// Strips: # Environment / # auto memory sections, gitStatus lines, fast_mode_info tags,
-// recent commits, knowledge cutoff notices, and similar Claude Code CLI injected noise.
+// stripEnvNoiseLines 从系统提示词中去除环境元数据行和段落。
+// 去除内容：# Environment / # auto memory 段落、gitStatus 行、fast_mode_info 标签、
+// 最近提交记录、知识截止日期通知等 Claude Code CLI 注入的噪音。
 func stripEnvNoiseLines(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	out := make([]string, 0, len(lines))
@@ -823,9 +823,9 @@ func normalizeToolDesc(desc, name string) string {
 	return "Tool: " + name
 }
 
-// sanitizeToolName normalizes a tool name to characters the Kiro API accepts.
-// Kiro tool names must be pure camelCase (no underscores or dashes).
-// Separators (_, -, and multi-underscore namespace prefixes) are converted to camelCase boundaries.
+// sanitizeToolName 将工具名规范化为 Kiro API 可接受的格式。
+// Kiro 工具名必须是纯 camelCase（不含下划线或连字符）。
+// 分隔符（_、- 和多下划线命名空间前缀）会被转换为 camelCase 边界。
 func sanitizeToolName(name string) string {
 	// Split on underscores and dashes, including multi-underscore namespace prefixes.
 	parts := strings.FieldsFunc(name, func(r rune) bool {

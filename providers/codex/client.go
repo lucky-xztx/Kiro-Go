@@ -25,8 +25,8 @@ func init() {
 	SetProxy("")
 }
 
-// SetProxy reconfigures the codex HTTP client to use the given outbound proxy URL.
-// An empty string falls back to HTTPS_PROXY/HTTP_PROXY environment variables.
+// SetProxy 重新配置 Codex HTTP 客户端使用指定的出站代理 URL。
+// 空字符串回退到 HTTPS_PROXY/HTTP_PROXY 环境变量。
 func SetProxy(proxyURL string) {
 	t := &http.Transport{
 		MaxIdleConns:        50,
@@ -55,7 +55,7 @@ func defaultHTTPClient() *http.Client {
 	return &http.Client{Timeout: 5 * time.Minute}
 }
 
-// CodexRequest is the body sent to chatgpt.com/backend-api/codex/responses.
+// CodexRequest 是发送到 chatgpt.com/backend-api/codex/responses 的请求体。
 type CodexRequest struct {
 	Instructions      string          `json:"instructions,omitempty"`
 	Stream            bool            `json:"stream"`
@@ -74,14 +74,14 @@ type CodexReasoning struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-// StreamEvent represents a single SSE event from the Codex responses API.
+// StreamEvent 表示 Codex 响应 API 的单个 SSE 事件。
 type StreamEvent struct {
 	Type  string          `json:"type"`
 	Delta string          `json:"delta,omitempty"`
 	Raw   json.RawMessage `json:"-"`
 }
 
-// StreamCallback receives parsed events from the Codex SSE stream.
+// StreamCallback 接收 Codex SSE 流中解析后的事件。
 type StreamCallback struct {
 	// OnEvent is called for every SSE event with the full parsed JSON object.
 	OnEvent func(eventType string, data json.RawMessage)
@@ -91,8 +91,7 @@ type StreamCallback struct {
 	OnHTTPStatus func(status int)
 }
 
-// CallCodexAPI sends a request to the Codex Responses API and processes the
-// streaming (or non-streaming) response via the provided callback.
+// CallCodexAPI 向 Codex 响应 API 发送请求，通过回调处理流式（或非流式）响应。
 func CallCodexAPI(accessToken, accountID string, req *CodexRequest, cb *StreamCallback) error {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -156,7 +155,7 @@ func applyCodexHeaders(req *http.Request, accessToken, accountID string, stream 
 }
 
 // parseSSEStream reads SSE text/event-stream from the Codex API.
-// Each "data: ..." line is forwarded to the callback.
+// 每一行 "data: ..." 都转发给回调。
 func parseSSEStream(body io.Reader, cb *StreamCallback) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 50*1024*1024) // 50MB max line

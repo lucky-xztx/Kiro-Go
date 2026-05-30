@@ -6,14 +6,12 @@ package proxy
 // this deep within the 30-day TTL.
 const maxResponsesHistoryDepth = 64
 
-// expandPreviousResponseHistory rebuilds the conversation history that led up
-// to prev. It walks the previous_response_id chain backwards (oldest → newest)
-// and emits OpenAI messages for both stored inputs and stored outputs of every
-// ancestor, so a multi-turn /v1/responses session preserves full context.
+// expandPreviousResponseHistory 重建导致 prev 的完整对话历史。
+// 它沿 previous_response_id 链向后遍历（最旧 → 最新），为每个祖先的
+// 存储输入和输出生成 OpenAI 消息，使多轮 /v1/responses 会话保持完整上下文。
 //
-// If a link in the chain is missing on disk (e.g. expired past TTL or the
-// referenced ID was deleted), expansion stops at the deepest reachable
-// ancestor instead of failing — the most recent context is still useful.
+// 如果链中某个环节在磁盘上丢失（例如超过 TTL 过期或引用的 ID 已被删除），
+// 扩展会在最深可达的祖先处停止而非失败——最近的上下文仍然有用。
 func expandPreviousResponseHistory(prev *ResponsesObject) []OpenAIMessage {
 	if prev == nil {
 		return nil

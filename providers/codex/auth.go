@@ -25,7 +25,7 @@ const (
 	deviceVerifyURL   = "https://auth.openai.com/codex/device"
 )
 
-// TokenResponse is the JSON returned by the OpenAI OAuth token endpoint.
+// TokenResponse 是 OpenAI OAuth 令牌端点返回的 JSON。
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
@@ -34,13 +34,13 @@ type TokenResponse struct {
 	ExpiresIn    int    `json:"expires_in"`
 }
 
-// PKCECodes holds the PKCE verifier and challenge pair.
+// PKCECodes 保存 PKCE 验证器和挑战对。
 type PKCECodes struct {
 	Verifier  string
 	Challenge string
 }
 
-// DeviceCodeResponse is returned by the device code start endpoint.
+// DeviceCodeResponse 是设备码启动端点返回的响应。
 type DeviceCodeResponse struct {
 	DeviceAuthID string `json:"device_auth_id"`
 	UserCode     string `json:"user_code"`
@@ -49,7 +49,7 @@ type DeviceCodeResponse struct {
 
 // ==================== PKCE ====================
 
-// GeneratePKCE creates a new PKCE code_verifier and code_challenge pair.
+// GeneratePKCE 生成新的 PKCE code_verifier 和 code_challenge 对。
 func GeneratePKCE() (*PKCECodes, error) {
 	verifierBytes := make([]byte, 96)
 	if _, err := rand.Read(verifierBytes); err != nil {
@@ -65,7 +65,7 @@ func GeneratePKCE() (*PKCECodes, error) {
 
 // ==================== Authorization URL ====================
 
-// GenerateState generates a random state parameter for CSRF protection.
+// GenerateState 生成随机 state 参数用于 CSRF 防护。
 func GenerateState() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -74,7 +74,7 @@ func GenerateState() (string, error) {
 	return base64urlEncode(b), nil
 }
 
-// BuildAuthorizationURL constructs the OAuth authorize URL with PKCE parameters.
+// BuildAuthorizationURL 构造带 PKCE 参数的 OAuth 授权 URL。
 func BuildAuthorizationURL(codeChallenge, state string) string {
 	params := url.Values{
 		"client_id":                  {clientID},
@@ -93,7 +93,7 @@ func BuildAuthorizationURL(codeChallenge, state string) string {
 
 // ==================== Token Exchange ====================
 
-// ExchangeCode exchanges an authorization code for tokens using PKCE.
+// ExchangeCode 使用 PKCE 将授权码兑换为令牌。
 func ExchangeCode(code, codeVerifier string) (*TokenResponse, error) {
 	data := url.Values{
 		"grant_type":    {"authorization_code"},
@@ -105,13 +105,12 @@ func ExchangeCode(code, codeVerifier string) (*TokenResponse, error) {
 	return doTokenRequest(data)
 }
 
-// RefreshTokens exchanges a refresh_token for a new access_token.
+// RefreshTokens 使用 refresh_token 换取新的 access_token。
 //
-// IMPORTANT: unlike the authorization_code exchange (which is form-urlencoded),
-// the Codex CLI sends the refresh request as a JSON body with the reduced
-// scope "openid profile email" (no offline_access). Sending it form-encoded or
-// with the wider scope makes auth.openai.com reject it with HTTP 401. This
-// mirrors the canonical Codex CLI behavior (see codex-lb refresh.py).
+// 重要：与授权码兑换（form-urlencoded）不同，Codex CLI 以 JSON body 发送刷新请求，
+// 使用缩减的 scope "openid profile email"（不含 offline_access）。
+// 使用 form-encoded 或更宽的 scope 会导致 auth.openai.com 返回 HTTP 401。
+// 这与 Codex CLI 的标准行为一致（参见 codex-lb refresh.py）。
 func RefreshTokens(refreshToken string) (*TokenResponse, error) {
 	payload := map[string]string{
 		"grant_type":    "refresh_token",
@@ -171,13 +170,12 @@ func doTokenRequestRaw(data url.Values) (*TokenResponse, error) {
 	return nil, tokenErrorFromBody(resp.StatusCode, respBody)
 }
 
-// parseTokenError extracts the OAuth error code and description from a token
-// endpoint error body. OpenAI returns two shapes depending on the endpoint:
-//   - flat OAuth2:  {"error":"invalid_grant","error_description":"..."}
-//   - nested:       {"error":{"code":"refresh_token_reused","message":"..."}}
+// parseTokenError 从令牌端点错误响应体中提取 OAuth 错误码和描述。
+// OpenAI 根据端点返回两种格式：
+//   - 扁平 OAuth2：{"error":"invalid_grant","error_description":"..."}
+//   - 嵌套格式：{"error":{"code":"refresh_token_reused","message":"..."}}
 //
-// Both must be handled, otherwise reused/revoked tokens slip past the retry
-// short-circuit (see RefreshTokens).
+// 两种格式都必须处理，否则重用/已撤销的令牌会绕过重试短路逻辑（参见 RefreshTokens）。
 func parseTokenError(body []byte) (code, message string) {
 	var probe struct {
 		Error            json.RawMessage `json:"error"`
@@ -269,7 +267,7 @@ func doTokenRequestJSON(payload map[string]string) (*TokenResponse, error) {
 
 // ==================== Device Code Flow ====================
 
-// StartDeviceCodeFlow initiates a device code authorization flow.
+// StartDeviceCodeFlow 启动设备码授权流程。
 func StartDeviceCodeFlow() (*DeviceCodeResponse, error) {
 	body, _ := json.Marshal(map[string]string{"client_id": clientID})
 	req, err := http.NewRequest("POST", deviceCodeURL, strings.NewReader(string(body)))
@@ -301,15 +299,15 @@ func StartDeviceCodeFlow() (*DeviceCodeResponse, error) {
 	return &dcr, nil
 }
 
-// DeviceCodePollResult is the result of a device code poll.
+// DeviceCodePollResult 是设备码轮询的结果。
 type DeviceCodePollResult struct {
 	Completed bool
 	TR        *TokenResponse
 }
 
-// PollDeviceCode polls the device code token endpoint once.
-// Returns completed=true with tokens if the user has authorized.
-// Returns completed=false if still pending.
+// PollDeviceCode 轮询设备码令牌端点一次。
+// 用户已授权时返回 completed=true 及令牌。
+// 仍在等待时返回 completed=false。
 func PollDeviceCode(deviceAuthID, userCode string) (*DeviceCodePollResult, error) {
 	body, _ := json.Marshal(map[string]string{
 		"device_auth_id": deviceAuthID,
@@ -365,7 +363,7 @@ func PollDeviceCode(deviceAuthID, userCode string) (*DeviceCodePollResult, error
 
 // ==================== Callback URL Parsing ====================
 
-// ParseCallbackURL extracts code and state from an OAuth callback URL.
+// ParseCallbackURL 从 OAuth 回调 URL 中提取 code 和 state。
 func ParseCallbackURL(callbackURL string) (code, state string, err error) {
 	u, err := url.Parse(callbackURL)
 	if err != nil {
@@ -385,7 +383,7 @@ func ParseCallbackURL(callbackURL string) (code, state string, err error) {
 
 // ==================== JWT Parsing ====================
 
-// ExtractAccountID parses the JWT id_token to extract the ChatGPT account ID.
+// ExtractAccountID 解析 JWT id_token 以提取 ChatGPT 账号 ID。
 func ExtractAccountID(idToken string) (string, error) {
 	parts := strings.Split(idToken, ".")
 	if len(parts) < 2 {
@@ -407,7 +405,7 @@ func ExtractAccountID(idToken string) (string, error) {
 	return claims.AuthInfo.ChatGptAccountID, nil
 }
 
-// ExtractEmail parses the JWT id_token to extract the email.
+// ExtractEmail 解析 JWT id_token 以提取邮箱地址。
 func ExtractEmail(idToken string) (string, error) {
 	parts := strings.Split(idToken, ".")
 	if len(parts) < 2 {
@@ -465,7 +463,7 @@ func io_ReadAll(r interface{ Read([]byte) (int, error) }) ([]byte, error) {
 	}
 }
 
-// GetDeviceVerifyURL returns the URL where users verify a device code.
+// GetDeviceVerifyURL 返回用户验证设备码的 URL。
 func GetDeviceVerifyURL() string {
 	return deviceVerifyURL
 }
